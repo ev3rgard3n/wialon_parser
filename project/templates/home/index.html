@@ -1,0 +1,48 @@
+{% extends 'template.html' %}
+
+{% block content %}
+    <div>{{ wialon_user }}</div>
+    
+    {% if "error" not in devices %}
+        <div class="row">
+            {% for key, device in devices.items %}
+                <div class="col-sm-4">
+                    <div class="card m-1">
+                        <div class="card-body">
+                            <h5 class="card-title">{{ device.id }}</h5>
+                            <p class="card-text">{{ device.name }}</p>
+                            <a href="{% url 'sensors' device.id %}" class="btn btn-primary">Подробнее</a>
+                        </div>
+                    </div>
+                </div>
+        {% endfor %}
+    {% else %}
+        <div></div>
+    {% endif %}
+        
+    </div>
+
+
+    
+    <div class="cars-list"></div>
+
+    <script>
+        async function query_wialon_get_last_events()
+        {
+            let response = await fetch( '/api/wialon/get_last_events/' );
+            let data = await response.json();
+            
+            if ('error' in data) {
+                let response = await fetch( 'logout/' );
+                window.location.reload();
+            }
+
+            setTimeout(query_wialon_get_last_events, 120000);
+        }
+
+        window.addEventListener('load', (event) => {
+           query_wialon_get_last_events();
+        });
+
+    </script>
+{% endblock %}
