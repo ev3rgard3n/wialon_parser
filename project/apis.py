@@ -13,8 +13,11 @@ def api_wialon_get_last_events(request):
             request.session.get('wialon_user_ip', None) is None:
         return HttpResponse('forbidden')
 
-    new_wialon_devices_info = WialonInfo(sdk_url=request.session.get('wialon_sdk_url', ''),
-                                         sid=request.session.get('wialon_sid', ''))
+    sdk_url=request.session.get('wialon_sdk_url', '')
+    sid=request.session.get('wialon_sid', '')
+    user_id=request.session.get('user_id', '')
+
+    new_wialon_devices_info = WialonInfo(sdk_url, sid, user_id)
     return JsonResponse(new_wialon_devices_info.get_last_events())
 
 

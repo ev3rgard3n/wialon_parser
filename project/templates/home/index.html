@@ -1,8 +1,37 @@
 {% extends 'template.html' %}
+{% load static %}
+
+
+{% block navigation %}
+    <div class="container-fluid">
+            <a class="navbar-brand" href="{% url 'home_index' %}">
+                <img src="{% static 'img/user_icon.svg' %}" alt="Avatar Logo" style="width:40px;" class="rounded-pill"> 
+                <span class="navbar-text">{{ wialon_user }}</span>
+            </a>
+
+            <div class="collapse navbar-collapse" id="mynavbar">
+            <ul class="navbar-nav me-auto">
+                <li class="nav-item">
+                <a class="nav-link" href="{% url 'home_index' %}">Link</a></a>
+                </li>
+                <li class="nav-item">
+                <a class="nav-link" href="{% url 'home_index' %}">Link</a></a>
+                </li>
+                <li class="nav-item">
+                <a class="nav-link" href="{% url 'home_index' %}">Link</a></a>
+                </li>
+                
+            </ul>
+            <form class="d-flex">
+                <input class="form-control me-2" type="text" placeholder="Поиск">
+                <button class="btn btn-primary" type="button">Поиск</button>
+            </form>
+            </div>
+        </div>
+{% endblock navigation %}
+
 
 {% block content %}
-    <div>{{ wialon_user }}</div>
-    
     {% if "error" not in devices %}
         <div class="row">
             {% for key, device in devices.items %}
@@ -19,13 +48,11 @@
     {% else %}
         <div></div>
     {% endif %}
-        
-    </div>
+        </div>
+{% endblock %}
 
 
-    
-    <div class="cars-list"></div>
-
+{% block js_scripts %}
     <script>
         async function query_wialon_get_last_events()
         {
@@ -41,8 +68,7 @@
         }
 
         window.addEventListener('load', (event) => {
-           query_wialon_get_last_events();
+            query_wialon_get_last_events();
         });
-
     </script>
-{% endblock %}
+{% endblock js_scripts %}

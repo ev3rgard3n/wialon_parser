@@ -4,6 +4,8 @@ from django.shortcuts import render, redirect
 from django.conf import settings
 from loguru import logger
 
+from project.utils import calculation_fuel_theft, calculation_total_fuel_difference
+
 from .wialon import *
 
 
@@ -19,17 +21,17 @@ def home_index(request):
 
     sdk_url=request.session.get('wialon_sdk_url', '')
     sid=request.session.get('wialon_sid', '')
+    user_id=request.session.get('user_id', '')
 
-    logger.debug(f"{request.session.items() = }")
-
-    new_wialon_devices_info = WialonInfo(sdk_url, sid)
+    new_wialon_devices_info = WialonInfo(sdk_url, sid, user_id)
     devices = new_wialon_devices_info.get_user_devices()
     
     output = {
         'wialon_user': request.session.get('wialon_user', None),
         'devices': devices
     }
-    print(f"{devices = }")
+
+    logger.debug(f'{request.session.items() = }')
     return render(request, 'home/index.html', output)
 
 
@@ -54,6 +56,7 @@ def wialon_send_auth(request):
 
 def wialon_recv_auth(request):
     svc_error = int(request.GET.get('svc_error', 0))
+    logger.debug(f"{request.session.items() = }")
     if not svc_error == 0:
         return HttpResponse(f'failed to auth: error {svc_error}')
     sdk_url = request.GET.get('wialon_sdk_url', None)
@@ -67,6 +70,8 @@ def wialon_recv_auth(request):
     request.session['wialon_sid'] = new_wialon_login.get_sid()
     request.session['wialon_user'] = new_wialon_login.get_user()
     request.session['wialon_user_ip'] = new_wialon_login.get_user_ip()
+    request.session['access_token'] = new_wialon_login.get_access_token()
+    request.session['user_id'] = new_wialon_login.get_user_id()
     return redirect('home_index')
 
 
@@ -74,24 +79,44 @@ def get_sensors(request, object_id) -> dict:
     sdk_url=request.session.get('wialon_sdk_url', '')
     sid=request.session.get('wialon_sid', '')
 
-    logger.debug(f"{sdk_url = } | {sid =}")
+    user_id=request.session.get('user_id', '')
 
-    new_wialon_devices_info = WialonInfo(sdk_url, sid)
+    new_wialon_devices_info = WialonInfo(sdk_url, sid, user_id)
     sensors = new_wialon_devices_info.get_sensors(object_id)
 
     print(sensors)
     return HttpResponse(f'sensors {sensors}')
 
 
-def get_fuel(request, object_id) -> dict:
+def fuel_report(request, object_id) -> dict:
     sdk_url=request.session.get('wialon_sdk_url', '')
     sid=request.session.get('wialon_sid', '')
+    user_id=request.session.get('user_id', '')
 
-    new_wialon_devices_info = WialonInfo(sdk_url, sid)
-    sensors = new_wialon_devices_info.get_fuel(object_id)
+    flag = request.GET.get('flag', "0x04")
+    date_start = request.GET.get('start', "0")
+    date_end = request.GET.get('end', "1")
 
-    print(sensors)
-    return HttpResponse(f'fuel {sensors}')
+    new_wialon_devices_info = WialonInfo(sdk_url, sid, user_id)
+    json_response = new_wialon_devices_info.fuel_report(object_id, flag, date_start, date_end)
+
+    logger.debug(f"{json_response = }")
+
+    data_for_table = calculation_fuel_theft(json_response)
+    fuel_theft = calculation_total_fuel_difference(data_for_table)
+    
+
+    context = {
+        "object_id":object_id,
+        "wialon_user": request.session.get('wialon_user', None),
+        "data_for_chart": json.dumps(json_response),
+        "data_for_table" : data_for_table, 
+        "fuel_theft" : fuel_theft
+    }
+
+    logger.debug(f"context: {context}")
+
+    return render(request, 'report/fuel.html', context)
 
 
 def get_data_from_sensor(request) -> dict:
@@ -100,8 +125,7 @@ def get_data_from_sensor(request) -> dict:
     """
     sdk_url=request.session.get('wialon_sdk_url', '')
     sid=request.session.get('wialon_sid', '')
+    user_id=request.session.get('user_id', '')
 
-    logger.debug(f"{sdk_url = } | {sid =}")
-
-    new_wialon_devices_info = WialonInfo(sdk_url, sid)
+    new_wialon_devices_info = WialonInfo(sdk_url, sid, user_id)
     devices = new_wialon_devices_info.get_user_devices()
