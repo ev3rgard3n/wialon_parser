@@ -17,30 +17,52 @@ def convert_unix_to_datetime(unix_time) -> datetime:
     return date_time
 
 
-def calculation_fuel_theft(data: dict, type=256) -> dict:
-    xData: list = data["datasets"]["0"]["data"]["x"]
-    yData: list = data["datasets"]["0"]["data"]["y"]
+def calculation_fuel_theft(data: dict, type=256) -> list[dict]:
+    xData = data["datasets"]["0"]["data"]["x"]
+    yData = data["datasets"]["0"]["data"]["y"]
     
-    # Время слива топлива
-    time_of_theft = [value for marker in data["markers"] if marker["type"] == type for value in marker["x"]]
-    # Индексы времени слива топлива
-    index_time_of_theft = [xData.index(x) for x in time_of_theft if x in xData]
+    fuel_values_before_and_during_theft = []
+    index_time_of_theft = []
 
-    # Извлечение значений топлива
-    fuel_values_before_and_during_theft = [
-        {
-            "time_of_theft": convert_unix_to_datetime(xData[index]),
-            "fuel_before_theft": yData[index] if index > 0 else None,
-            "fuel_during_theft": yData[index + 1],
-            "fuel_difference": yData[index] - yData[index + 1] if index > 0 else None
-        }
-        for index in index_time_of_theft
-    ]
-    
+    if "markers" in data:
+        # Время слива топлива
+        time_of_theft = [value for marker in data["markers"] if marker["type"] == type for value in marker["x"]]
+        
+        # Индексы времени слива топлива
+        for x in time_of_theft:
+            if x in xData:
+                index_time_of_theft.append(xData.index(x))
+            else:
+                # Найти две ближайшие точки времени до и после
+                prev_time = max(filter(lambda y: y < x, xData), default=None)
+                next_time = min(filter(lambda y: y > x, xData), default=None)
+                
+                if prev_time is not None and next_time is not None:
+                    index_time_of_theft.append((xData.index(prev_time), xData.index(next_time)))
+                elif prev_time is not None:
+                    index_time_of_theft.append((xData.index(prev_time),))
+                elif next_time is not None:
+                    index_time_of_theft.append((xData.index(next_time),))
+        
+        # Извлечение значений топлива
+        fuel_values_before_and_during_theft = []
+        for indices in index_time_of_theft:
+            if isinstance(indices, int):
+                indices = (indices,)  # Преобразовать в кортеж, если это одно целое число
+            for index in indices:
+                if 0 <= index < len(yData) and index + 1 < len(yData):
+                    fuel_value = {
+                        "time_of_theft": convert_unix_to_datetime(xData[index]),
+                        "fuel_before_theft": yData[index] if index > 0 else None,
+                        "fuel_during_theft": yData[index + 1],
+                        "fuel_difference": yData[index] - yData[index + 1] if index > 0 else None
+                    }
+                    fuel_values_before_and_during_theft.append(fuel_value)
+
     return fuel_values_before_and_during_theft
 
+
+
+
 def calculation_total_fuel_difference(data: list[dict]) -> int:
-    total_fuel = [float(item["fuel_difference"]) for item in data]
-    
-    logger.debug(f"{total_fuel = }")
-    return sum(total_fuel)
+    return sum([float(item["fuel_difference"]) for item in data])

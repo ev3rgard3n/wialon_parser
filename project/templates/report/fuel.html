@@ -49,25 +49,25 @@
 <div class="container mt-3 mb-5">
     <div class="d-flex justify-content-between align-items-center">
         <div class="btn-group" role="group" aria-label="Basic outlined example">
-            <button type="button" class="btn btn-outline-primary" title="За вчера с 00:00 до 23:59">
-                <a class="nav-link" href="{% url 'fuel_report' object_id %}">Вчера</a>
+            <button onclick="setInterval('yesterday')" type="button" class="btn btn-outline-primary" title="За вчера с 00:00 до 23:59">
+                Вчера
             </button>
-            <button type="button" class="btn btn-outline-primary" title="За сегодня с 00:00 до настоящего момента">
-                <a class="nav-link" href="{% url 'fuel_report' object_id %}">Сегодня</a>
+            <button onclick="setInterval('today')" type="button" class="btn btn-outline-primary" title="За сегодня с 00:00 до настоящего момента">
+                Сегодня
             </button>
-            <button type="button" class="btn btn-outline-primary" title="За прошлую неделю">
-                <a class="nav-link" href="{% url 'fuel_report' object_id %}">Неделя</a>
+            <button onclick="setInterval('last_week')" type="button" class="btn btn-outline-primary" title="За прошлую неделю">
+                Неделя
             </button>
-            <button type="button" class="btn btn-outline-primary" title="За прошлый месяц">
-                <a class="nav-link" href="{% url 'fuel_report' object_id %}">Месяц</a>
+            <button onclick="setInterval('last_month')" type="button" class="btn btn-outline-primary" title="За прошлый месяц">
+                Месяц
             </button>
         </div>
 
         <div class="d-flex align-items-center">
             <label for="startDate" class="mr-3" style="margin-right: 1vw;">Начало: </label>
-            <input type="date" id="startDate" class="form-control mr-3" style="margin-right: 1vw;">
+                <input type="date" id="startDate" class="form-control mr-3" style="margin-right: 1vw;">
             <label for="endDate" class="mr-3" style="margin-right: 1vw;">Конец: </label>
-            <input type="date" id="endDate" class="form-control mr-3" style="margin-right: 0.5vw;">
+                <input type="date" id="endDate" class="form-control mr-3" style="margin-right: 0.5vw;">
             <button id="searchButton" class="btn btn-primary">Поиск</button>
         </div>
     </div>
@@ -108,6 +108,23 @@
 
 {% block js_scripts %}
 <script>
+    async function query_wialon_get_last_events()
+        {
+            let response = await fetch( '/api/wialon/get_last_events/' );
+            let data = await response.json();
+            
+            if ('error' in data) {
+                let response = await fetch( 'logout/' );
+                window.location.reload();
+            }
+
+            setTimeout(query_wialon_get_last_events, 120000);
+        }
+
+        window.addEventListener('load', (event) => {
+            query_wialon_get_last_events();
+        });
+
     document.addEventListener('DOMContentLoaded', function() {
         const data = JSON.parse('{{ data_for_chart|safe }}');
 
@@ -144,13 +161,18 @@
                 scales: {
                     x: {
                         type: 'linear',
-                        position: 'bottom',
+                        time: {
+                            unit: 'hour',
+                            displayFormats: {
+                                hour: 'HH:mm DD-MM'
+                            }
+                        },
                         ticks: {
+                            source: 'auto',
                             callback: function(value, index, values) {
                                 return formatTimeLabels(value, index, values);
-                            },
-                            stepSize: 12 * 3600 * 1000 // Интервал 12 часов
-                        },
+                            }
+                        }
                     },
                     y: {
                         ticks: {
@@ -170,9 +192,10 @@
                             title: function(tooltipItems, data) {
                                 const date = new Date(tooltipItems[0].parsed.x);
                                 const hours = date.getHours().toString().padStart(2, '0');
+                                const minutes = date.getMinutes().toString().padStart(2, '0');
                                 const day = date.getDate().toString().padStart(2, '0');
                                 const month = (date.getMonth() + 1).toString().padStart(2, '0');
-                                return `${hours}:00 ${day}-${month}`;
+                                return `${hours}:${minutes} ${day}-${month}`;
                             },
                             label: function(tooltipItem) {
                                 return `Уровень топлива: ${tooltipItem.raw}`;
@@ -180,6 +203,7 @@
                         }
                     }
                 },
+               
                 interaction: {
                     mode: 'nearest',
                     axis: 'x',
@@ -199,27 +223,32 @@
             document.querySelectorAll('.chart-marker').forEach(el => el.remove());
 
             markers.forEach(marker => {
-                const index = xData.findIndex(date => date.getTime() / 1000 === marker.x[0]);
-                if (index !== -1) {
-                    const iconUrl = markerIcons[marker.type] || "{% static 'img/error.svg' %}";
-                    const markerElement = new Image();
-                    markerElement.src = iconUrl;
-                    markerElement.style.position = 'absolute';
-                    markerElement.style.width = '20px';
-                    markerElement.style.height = '20px';
-                    markerElement.style.top = '10vh'; // Adjust as needed
-                    markerElement.classList.add('chart-marker');
+                // Calculate the x position for the marker
+                const xValue = marker.x[0] * 1000;  // Convert to milliseconds
+                const scale = chart.scales['x'];
+                const xPosition = scale.getPixelForValue(xValue);
 
-                    const canvasPosition = chart.getDatasetMeta(0).data[index].getCenterPoint();
-                    markerElement.style.left = canvasPosition.x + 'px';
-                    markerElement.setAttribute('data-index', index);
-                    document.getElementById('fuelChart').parentNode.appendChild(markerElement);
-                }
+                // Create marker element
+                const iconUrl = markerIcons[marker.type] || "{% static 'img/error.svg' %}";
+                const markerElement = new Image();
+                markerElement.src = iconUrl;
+                markerElement.style.position = 'absolute';
+                markerElement.style.width = '20px';
+                markerElement.style.height = '20px';
+                markerElement.style.top = '10vh';  // Adjust as needed
+                markerElement.classList.add('chart-marker');
+
+                markerElement.style.left = xPosition + 'px';
+                markerElement.title = "Время слива: " + formatTimeLabels(marker.x[0] * 1000);
+
+                document.getElementById('fuelChart').parentNode.appendChild(markerElement);
             });
         }
 
+
         // Adjust marker positions on resize
         window.addEventListener('resize', addMarkers);
+        
 
         // Filter markers based on checkbox
         document.getElementById('markerFilter').addEventListener('change', function() {
@@ -234,10 +263,6 @@
 
         chart.update();
 
-        // Date range filter functionality
-        function toUnixTimestamp(dateStr) {
-            return Math.floor(new Date(dateStr).getTime() / 1000);
-        }
 
         document.getElementById('searchButton').addEventListener('click', function() {
             const startDate = document.getElementById('startDate').value;
@@ -254,9 +279,88 @@
             const endUnix = toUnixTimestamp(endDateTime);
 
             // Perform AJAX request or redirect with date parameters in UNIX format
-            const url = "{% url 'fuel_report' object_id %}?flag=" + "0x00" + "&start=" + startUnix + "&end=" + endUnix;
+            const url = "{% url 'fuel_report' object_id %}?flag=0x00" + "&start=" + startUnix + "&end=" + endUnix;
             window.location.href = url;
         });
     });
+
+    function toUnixTimestamp(dateStr) {
+            return Math.floor(new Date(dateStr).getTime() / 1000);
+        }
+
+    function getCurrentTimeFormatted() {
+        const now = new Date();
+        
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        const seconds = String(now.getSeconds()).padStart(2, '0');
+
+        const currentTime = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+        return currentTime;
+    }
+
+    function getEndOfDayFormatted() {
+        const now = new Date();
+        
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+
+        const startOfDay = `${year}-${month}-${day} 23:59:59`;
+        return startOfDay;
+    }
+
+    function getStartOfDayFormatted() {
+        const now = new Date();
+        
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+
+        const startOfDay = `${year}-${month}-${day} 00:00:00`;
+        return startOfDay;
+    }
+
+    function setInterval(flag) {
+        let wialon_flag;
+        let start;
+        let end;
+
+        switch(flag) {
+            case 'yesterday':  
+                    wialon_flag = "16777218";
+                    start = "0";
+                    end = "1";
+                break;
+
+            case 'today':  
+                    wialon_flag = "16777216"
+                    start = toUnixTimestamp(getStartOfDayFormatted());
+                    end = toUnixTimestamp(getEndOfDayFormatted());
+                break;
+                
+            case 'last_week':  
+                    wialon_flag = "0x04";
+                    start = "0";
+                    end = "1";
+                break;
+
+            case 'last_month':  
+                    wialon_flag = "0x08";
+                    start = "0";
+                    end = "1";
+                break;
+
+            default:
+                const url = "{% url 'fuel_report' object_id %}";
+                window.location.href = url;
+                break;
+        }
+        const url = "{% url 'fuel_report' object_id %}?flag=" + wialon_flag + "&start=" + start + "&end=" + end;
+        window.location.href = url;
+    }
 </script>
 {% endblock js_scripts %}
