@@ -76,16 +76,18 @@ def wialon_recv_auth(request):
 
 
 def get_sensors(request, object_id) -> dict:
-    sdk_url=request.session.get('wialon_sdk_url', '')
-    sid=request.session.get('wialon_sid', '')
+    try:
+        sdk_url=request.session.get('wialon_sdk_url', '')
+        sid=request.session.get('wialon_sid', '')
 
-    user_id=request.session.get('user_id', '')
+        user_id=request.session.get('user_id', '')
 
-    new_wialon_devices_info = WialonInfo(sdk_url, sid, user_id)
-    sensors = new_wialon_devices_info.get_sensors(object_id)
+        new_wialon_devices_info = WialonInfo(sdk_url, sid, user_id)
+        sensors = new_wialon_devices_info.get_sensors(object_id)
 
-    print(sensors)
-    return HttpResponse(f'sensors {sensors}')
+        return render(request, "report/sensors.html", sensors)
+    except Exception:
+        return redirect("logout")
 
 
 def fuel_report(request, object_id) -> dict:

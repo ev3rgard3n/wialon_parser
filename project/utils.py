@@ -1,5 +1,6 @@
 from datetime import datetime
 import time
+from typing import Tuple
 from loguru import logger
 
 
@@ -63,6 +64,45 @@ def calculation_fuel_theft(data: dict, type=256) -> list[dict]:
 
 
 
-
 def calculation_total_fuel_difference(data: list[dict]) -> int:
     return sum([float(item["fuel_difference"]) for item in data])
+
+
+def calculation_max_and_min_index(count: int | float) -> Tuple[int, int]:
+    if count - 500 >= 0: 
+        return count - 1, count - 500
+    if count - 100 >= 0: 
+        return count - 1, count - 100
+    
+    return count - 1, count - 50
+
+
+def test_sens(sensors: dict) -> dict:
+    sensors_ = {}
+    for key, item in sensors.items():
+        name = item.get("n")
+        type_ = item.get("t")
+        param = item.get("p")
+        sensors_[param] = {
+            "name": name,
+            "type": type_,
+            "param": param,
+            "data": {}
+        }
+    return sensors_
+
+
+def exception_sensors_data(sensors_: dict, data: list):
+    for item in data[0]:
+        time = convert_unix_to_datetime(item["t"])
+        logger.debug(f"I = {item}")
+        
+        for key, value in item["p"].items():
+            if key in sensors_ and sensors_[key]['type'] == 'fuel level':
+                if value > 4096 or value == 65535 or value == 0:
+                    logger.debug(f"Fuel level sensor error detected: {value} at {time}")
+                    sensors_[key]["data"][time] = value
+    
+
+    return sensors_
+       

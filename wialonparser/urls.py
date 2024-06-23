@@ -24,7 +24,7 @@ urlpatterns = [
     path('', views.home_index, name='home_index'),
     path('logout/', views.logout_user, name='logout'),
 
-    path("api/wialon/senors/<int:object_id>", views.get_sensors, name="sensors"),
+    path("api/wialon/sensors/<int:object_id>", views.get_sensors, name="sensors"),
     path("api/wialon/test_feul/<int:object_id>", views.fuel_report, name="fuel_report"),
 
 
@@ -32,6 +32,5 @@ urlpatterns = [
     path('wialon_recv_auth/', views.wialon_recv_auth),
 
     path('api/wialon/get_last_events/', apis.api_wialon_get_last_events),
-    path('api/test/', apis.test),
     path('api/first_init/', apis.first_init)
 ]

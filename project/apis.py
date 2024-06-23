@@ -21,10 +21,6 @@ def api_wialon_get_last_events(request):
     return JsonResponse(new_wialon_devices_info.get_last_events())
 
 
-def test(request):
-    return JsonResponse({'test': 'some data from api'})
-
-
 def wialon_login():
     wialon_url = 'https://hst-api.wialon.com/wialon/ajax.html'
     token = '5702d603aeb55b9125c105c8cc0b7327BC5C050E62F788F20E5827C44243DEB08A74955D'

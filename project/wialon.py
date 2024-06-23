@@ -4,6 +4,8 @@ from datetime import datetime
 import requests
 import json
 
+from project.utils import calculation_max_and_min_index, exception_sensors_data, test_sens
+
 
 class WialonLogin:
     def __init__(
@@ -24,14 +26,15 @@ class WialonLogin:
         self.devices = json.loads(self.logged_in_data["user"]["prp"]["monu"])
 
     def send_wialon_request(self, add_to_sdk_url, post_data, method="get") -> dict:
-        if method == "get":
+        """TODO: Можно унифицировать"""
+        if method.lower() == "get":
             response = str(
                 requests.get(
                     f"{self.sdk_url}/{add_to_sdk_url}", data=post_data
                 ).content,
                 encoding="utf-8",
             )
-        if method == "post":
+        if method.lower() == "post":
             response = str(
                 requests.post(
                     f"{self.sdk_url}/{add_to_sdk_url}", data=post_data
@@ -111,21 +114,122 @@ class WialonInfo(WialonLogin):
         self.devices = output
         return output
 
-    def get_sensors(self, object_id: int):
-        json_data = {"id": object_id, "flags": "0x00001000"}
-
-        response = self.send_wialon_request(
+    def _get_sensors(self, object_id: int) -> dict:
+        """
+        Получить все датчики авто
+        URL: https://sdk.wialon.com/wiki/ru/sidebar/remoteapi/apiref/core/search_item
+        """
+        sensors = self.send_wialon_request(
             "wialon/ajax.html",
             {
                 "svc": "core/search_item",
                 "sid": self.sid,
-                "params": json.dumps(json_data),
+                "params": json.dumps({"id": object_id, "flags": "0x00001000"}),
             },
         )
+        logger.debug(f"Датчики: {sensors}")
 
-        logger.debug(f"!!!!!! {response = } !!!!!!")
+        if "error" in sensors or sensors is None:
+            raise Exception()
+        
+        return sensors["item"]["sens"]
 
+    def _remove_layer(self, layerName="messages") -> None:
+        """
+        Чтобы удалить слой
+        URl: https://sdk.wialon.com/wiki/ru/local/remoteapi2304/apiref/render/remove_layer
+        """
+        self.send_wialon_request(
+            "wialon/ajax.html",
+            {
+                "svc": "render/remove_layer",
+                "sid": self.sid,
+                "params": json.dumps({"layerName": layerName}),
+            },
+            method="post",
+        )
+
+    def _create_messages_layer(self, object_id: int) -> dict:
+        """
+        TODO: Обдумать как время делать
+
+        Чтобы узнать после общее количество существующих записей за время
+        URL: https://sdk.wialon.com/wiki/ru/sidebar/remoteapi/apiref/render/create_messages_layer
+        """
+        response = self.send_wialon_request(
+            "wialon/ajax.html",
+            {
+                "svc": "render/create_messages_layer",
+                "sid": self.sid,
+                "params": json.dumps(
+                    {
+                        "layerName": "messages",
+                        "itemId": object_id,
+                        "timeFrom": 1717963200,
+                        "timeTo": 1718567999,
+                        "tripDetector": 0,
+                        "flags": 0,
+                        "trackWidth": 4,
+                        "trackColor": "cc0000ff",
+                        "annotations": 0,
+                        "points": 0,
+                        "pointColor": "cc0000ff",
+                        "arrows": 0,
+                    }
+                ),
+            },
+            method="post",
+        )
         return response
+
+    def get_sensors(self, object_id: int) -> dict:
+        try:
+
+            sensors = self._get_sensors(object_id)
+            test_sensors = test_sens(sensors)
+            logger.debug(f"{test_sensors = }")
+
+            
+            self._remove_layer()
+
+            messages = self._create_messages_layer(object_id)
+
+            max_index, min_index = calculation_max_and_min_index(
+                messages["units"][0]["msgs"]["count"]
+            )
+            logger.debug(f" Индексы min: {min_index} | max: {max_index} ")
+
+            
+            statistics = self.send_wialon_request(
+                "wialon/ajax.html",
+                {
+                    "svc": "core/batch",
+                    "sid": self.sid,
+                    "params": json.dumps(
+                        {
+                            "params": [
+                                {
+                                    "svc": "render/get_messages",
+                                    "params": {
+                                        "layerName": "messages",
+                                        "indexFrom": min_index,
+                                        "indexTo": max_index,
+                                        "unitId": object_id,
+                                    },
+                                }
+                            ],
+                            "flags": 0,
+                        }
+                    ),
+                },
+                method="post",
+            )
+
+            exception_sensors_data(test_sensors, statistics)
+
+            return {"sensors": sensors, "statistics": statistics}
+        except Exception as e:
+            logger.opt(exception=e).critical("Ошибка в получении датчиков")
 
     def __get_clenup_params(self) -> dict:
         """
@@ -173,7 +277,7 @@ class WialonInfo(WialonLogin):
             "params": {"itemId": self.user_id, "col": ["2"], "flags": 0},
         }
 
-    def _batch_request(self, params_l: list) -> list[dict]:
+    def _batch_request(self, params_l: list[dict]) -> list[dict]:
         """
         Несколько команд могут быть выполнены одним запросом
         URL: https://sdk.wialon.com/wiki/ru/sidebar/remoteapi/apiref/core/batch
@@ -187,7 +291,7 @@ class WialonInfo(WialonLogin):
                     "svc": "core/batch",
                     "sid": self.sid,
                     "params": json.dumps(data),
-                    "flags": 0
+                    "flags": 0,
                 },
                 method="post",
             )
@@ -303,16 +407,13 @@ class WialonInfo(WialonLogin):
             method="post",
         )
 
-    def fuel_report(
-        self, object_id: int, flag: str, date_start: str, date_end: str\
-    ):
+    def fuel_report(self, object_id: int, flag: str, date_start: str, date_end: str):
 
         batch_params = [self.__get_clenup_params(), self.get_template_parameters()]
         batch_response = self._batch_request(batch_params)
         logger.debug(f"batch_response: {batch_response}")
 
-        exec_response = self._exec_request(
-            object_id, flag, date_start, date_end)
+        exec_response = self._exec_request(object_id, flag, date_start, date_end)
         logger.debug(f"!!! {exec_response = } !!!")
 
         apply_report_result = self._check_report_status()
@@ -322,7 +423,6 @@ class WialonInfo(WialonLogin):
         json_response = self._get_render_json()
 
         return json_response
-
 
     def get_last_events(self):
         return self.send_wialon_request("avl_evts", {"sid": self.sid})
