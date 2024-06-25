@@ -32,13 +32,41 @@
 
 
 {% block content %}
+    
     <div>
-        {{ sensors }}
+        {% if statistics.params_with_error %}
+            <table class="table table-danger">
+            <thead>
+                <tr>
+                    <th scope="col">ID датчика</th>
+                    <th scope="col">Название датчика</th>
+                    <th scope="col">Тип датчика</th>
+                    <th scope="col">Параметр</th>
+                    <th scope="col">Значение</th>
+                    <th scope="col">Время</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for key, value in statistics.items %}
+                    {% for data_time, data_value in value.data.items %}
+                        <tr>
+                            <th scope="row">{{ value.id }}</th>
+                            <td>{{ value.name }}</td>
+                            <td>{{ value.type }}</td>
+                            <td>{{ key }}</td>
+                            <td>{{ data_value }}</td>
+                            <td>{{ data_time }}</td>
+                        </tr>
+                    {% endfor %}
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+            Ошибки в датчиках отсвуют
+        {% endif %}
+        
     </div>
 
-    <div>
-        {{ statistics }}
-    </div>
     
 {% endblock %}
 
@@ -52,7 +80,7 @@
             
             if ('error' in data) {
                 console.log("Error in data received from API:", data);
-                let logoutResponse = await fetch('/logout/');
+                let logoutResponse = await fetch('logout/');
                 if (logoutResponse.ok) {
                     console.log("Logged out successfully, reloading page.");
                     window.location.reload();

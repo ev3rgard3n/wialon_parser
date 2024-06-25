@@ -1,10 +1,9 @@
 import time
 from loguru import logger
-from datetime import datetime
 import requests
 import json
 
-from project.utils import calculation_max_and_min_index, exception_sensors_data, test_sens
+from project.utils import _rebuilding_sensor_format, calculation_max_and_min_index, exception_sensors_data, get_time_start_and_end
 
 
 class WialonLogin:
@@ -149,7 +148,7 @@ class WialonInfo(WialonLogin):
             method="post",
         )
 
-    def _create_messages_layer(self, object_id: int) -> dict:
+    def _create_messages_layer(self, object_id: int, timeFrom: int, timeTo: int) -> dict:
         """
         TODO: Обдумать как время делать
 
@@ -165,8 +164,8 @@ class WialonInfo(WialonLogin):
                     {
                         "layerName": "messages",
                         "itemId": object_id,
-                        "timeFrom": 1717963200,
-                        "timeTo": 1718567999,
+                        "timeFrom": timeFrom,
+                        "timeTo": timeTo,
                         "tripDetector": 0,
                         "flags": 0,
                         "trackWidth": 4,
@@ -182,17 +181,18 @@ class WialonInfo(WialonLogin):
         )
         return response
 
-    def get_sensors(self, object_id: int) -> dict:
+    def get_sensors_statistics(self, object_id: int, flag: str) -> dict:
         try:
 
             sensors = self._get_sensors(object_id)
-            test_sensors = test_sens(sensors)
-            logger.debug(f"{test_sensors = }")
-
+            test_sensors = _rebuilding_sensor_format(sensors)
             
             self._remove_layer()
-
-            messages = self._create_messages_layer(object_id)
+            timeFrom, timeTo = get_time_start_and_end(flag)
+            messages = self._create_messages_layer(object_id, timeFrom, timeTo)
+            
+            if messages is None or messages.get("error") == 1001:
+                return {"regtime-time":{"name":"Потеря сотовой связи", "type":"custom", "param":"regtime-time", "data":{"?":"Возможны проблемы с датчиком"}}}
 
             max_index, min_index = calculation_max_and_min_index(
                 messages["units"][0]["msgs"]["count"]
@@ -225,9 +225,11 @@ class WialonInfo(WialonLogin):
                 method="post",
             )
 
-            exception_sensors_data(test_sensors, statistics)
+            statistics = exception_sensors_data(test_sensors, statistics)
+            logger.debug(f"statistics: {statistics}")
 
-            return {"sensors": sensors, "statistics": statistics}
+
+            return statistics
         except Exception as e:
             logger.opt(exception=e).critical("Ошибка в получении датчиков")
 
@@ -414,14 +416,12 @@ class WialonInfo(WialonLogin):
         logger.debug(f"batch_response: {batch_response}")
 
         exec_response = self._exec_request(object_id, flag, date_start, date_end)
-        logger.debug(f"!!! {exec_response = } !!!")
-
         apply_report_result = self._check_report_status()
+
         if apply_report_result is None:
             raise Exception("Ошибка применения результата отчета")
 
         json_response = self._get_render_json()
-
         return json_response
 
     def get_last_events(self):

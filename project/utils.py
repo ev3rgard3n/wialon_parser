@@ -1,21 +1,53 @@
-from datetime import datetime
 import time
+from datetime import datetime, timedelta
 from typing import Tuple
 from loguru import logger
 
 
-def convert_time_to_unix(date_time: datetime) -> time:
-    unix_time = time.mktime(date_time.timetuple())
-    logger.debug(f"{unix_time = }")
-    logger.debug(f"{type(unix_time) = }")
-    return unix_time
+
+def convert_to_unix(date_time: datetime) -> time:
+    return int(time.mktime(date_time.timetuple()))
 
 
 def convert_unix_to_datetime(unix_time) -> datetime:
-    date_time =  datetime.fromtimestamp(unix_time).strftime('%Y-%m-%d %H:%M:%S')
-    logger.debug(f"{date_time}")
-    logger.debug(f"{type(date_time)}")
-    return date_time
+    return datetime.fromtimestamp(unix_time).strftime('%Y-%m-%d %H:%M:%S')
+
+
+def get_time_start_and_end(flag: str) -> int:
+    """ Вычисляет дату начала и окончания промежутка по флагу\n
+        Флаг	Описание
+        0x00 - начала текущего дня до его конца
+        0x02 - начала и конец предыдущего дня
+        0x04 - начало и конец предыдущей недели
+        0x08 - начало и конец предыдущего месяца
+     """
+    now = datetime.now()
+
+    if flag == "0x00": 
+        start = datetime(now.year, now.month, now.day)
+        end = start + timedelta(days=1) - timedelta(seconds=1)
+
+    if flag == "0x02": 
+        start = datetime(now.year, now.month, now.day) - timedelta(days=1)
+        end = datetime(now.year, now.month, now.day) - timedelta(seconds=1)
+
+    if flag == "0x04": 
+        start = now - timedelta(days=now.weekday() + 7)
+        start = datetime(start.year, start.month, start.day)
+        end = start + timedelta(days=7) - timedelta(seconds=1)
+
+    if flag == "0x08": 
+        if now.month == 1:
+            start = datetime(now.year - 1, 12, 1)
+        else:
+            start = datetime(now.year, now.month - 1, 1)
+
+        next_month = start.replace(day=28) + timedelta(days=4)
+        end = next_month - timedelta(days=next_month.day)
+        end = end.replace(hour=23, minute=59, second=59)
+
+    logger.debug(f"Интервал времени: начало {start} | конец {end}")
+    return convert_to_unix(start), convert_to_unix(end)
 
 
 def calculation_fuel_theft(data: dict, type=256) -> list[dict]:
@@ -77,8 +109,9 @@ def calculation_max_and_min_index(count: int | float) -> Tuple[int, int]:
     return count - 1, count - 50
 
 
-def test_sens(sensors: dict) -> dict:
-    sensors_ = {}
+def _rebuilding_sensor_format(sensors: dict) -> dict:
+    sensors_ = {"params_with_error": set()}
+
     for key, item in sensors.items():
         name = item.get("n")
         type_ = item.get("t")
@@ -89,20 +122,20 @@ def test_sens(sensors: dict) -> dict:
             "param": param,
             "data": {}
         }
+
     return sensors_
 
 
 def exception_sensors_data(sensors_: dict, data: list):
     for item in data[0]:
-        time = convert_unix_to_datetime(item["t"])
-        logger.debug(f"I = {item}")
-        
         for key, value in item["p"].items():
-            if key in sensors_ and sensors_[key]['type'] == 'fuel level':
-                if value > 4096 or value == 65535 or value == 0:
-                    logger.debug(f"Fuel level sensor error detected: {value} at {time}")
-                    sensors_[key]["data"][time] = value
-    
 
+            if key in sensors_ and sensors_[key]['type'] == 'fuel level':
+                if value > 4096 or value == 65535 or value <= 0:
+                    sensors_[key]["data"][time] = value
+                    sensors_["params_with_error"].add(key)
+                    time = convert_unix_to_datetime(item["t"])
+
+                    logger.debug(f"Найдена ошибка в датчике топлива: {value} at {time}")
     return sensors_
        
