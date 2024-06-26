@@ -26,6 +26,7 @@ urlpatterns = [
 
     path("api/wialon/sensors/<int:object_id>", views.get_sensors_statistics, name="sensors"),
     path("api/wialon/feul_report/<int:object_id>", views.fuel_report, name="fuel_report"),
+    path("api/wialon/feul_report/all/", views.fuel_report_for_all, name="fuel_report_for_all"),
 
 
     path('wialon_send_auth/', views.wialon_send_auth, name='wialon_send_auth'),

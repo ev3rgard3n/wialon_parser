@@ -103,6 +103,7 @@ class WialonInfo(WialonLogin):
                 ),
             },
         )
+        # logger.debug(f"{a = }")
         if "error" in a:
             return a
         for item in a["items"]:
@@ -112,6 +113,125 @@ class WialonInfo(WialonLogin):
             }
         self.devices = output
         return output
+
+    def fuel_report(self, object_id: int, flag: str, date_start: str, date_end: str):
+
+        batch_params = [self.__get_clenup_params(), self.get_template_parameters()]
+        batch_response = self._batch_request(batch_params)
+        logger.debug(f"batch_response: {batch_response}")
+
+        self._exec_request(object_id, flag, date_start, date_end)
+        apply_report_result = self._check_report_status()
+
+        if apply_report_result is None:
+            raise Exception("Ошибка применения результата отчета")
+
+        json_response = self._get_render_json()
+        return json_response
+
+    def fuel_report_for_all(self, flag: str, dateStart: str, dateEnd: str): 
+        devices = self.get_user_devices()
+        count = 0
+        for device_id, device_info in devices.items():
+            sensors_data = self.get_sensors_statistics(device_id, flag)
+            device_info['sensors'] = sensors_data
+            count +=1
+            if count == 5: break
+        return devices          
+
+    def get_sensors_statistics(self, object_id: int, flag: str) -> dict:
+        try:
+
+            sensors = self._get_sensors(object_id)
+            test_sensors = _rebuilding_sensor_format(sensors)
+            
+            self._remove_layer()
+            timeFrom, timeTo = get_time_start_and_end(flag)
+            messages = self._create_messages_layer(object_id, timeFrom, timeTo)
+            
+            logger.debug(f"messages: {messages}")
+
+            if messages is None or messages.get("error") == 1001:
+                logger.error(f"Error messages: {messages}")
+                return {"regtime-time":{"name":"Потеря сотовой связи", "type":"custom", "param":"regtime-time", "data":{"?":"Возможны проблемы с датчиком"}}}
+            if messages.get("error") == 6:
+                return None
+            
+            max_index, min_index = calculation_max_and_min_index(
+                messages["units"][0]["msgs"]["count"]
+            )
+            logger.debug(f" Индексы min: {min_index} | max: {max_index} ")
+
+            
+            statistics = self.send_wialon_request(
+                "wialon/ajax.html",
+                {
+                    "svc": "core/batch",
+                    "sid": self.sid,
+                    "params": json.dumps(
+                        {
+                            "params": [
+                                {
+                                    "svc": "render/get_messages",
+                                    "params": {
+                                        "layerName": "messages",
+                                        "indexFrom": min_index,
+                                        "indexTo": max_index,
+                                        "unitId": object_id,
+                                    },
+                                }
+                            ],
+                            "flags": 0,
+                        }
+                    ),
+                },
+                method="post",
+            )
+
+            logger.debug(f"statistics: {statistics}")
+            statistics = exception_sensors_data(test_sensors, statistics)
+
+
+            return statistics
+        except Exception as e:
+            logger.opt(exception=e).critical("Ошибка в получении датчиков")
+    
+    def get_templates(self):
+        """
+        Получить все существующие шаблоны
+        URL: https://sdk.wialon.com/wiki/ru/local/remoteapi2304/apiref/core/update_data_flags
+        """
+        return self.send_wialon_request(
+            add_to_sdk_url="wialon/ajax.html",
+            post_data={
+                "svc": "core/update_data_flags",
+                "sid": self.sid,
+                "params": json.dumps(
+                    {
+                        "spec": [
+                            {
+                                "type": "type",
+                                "data": "avl_resource",
+                                "flags": 8389121,
+                                "mode": 1,
+                            }
+                        ]
+                    }
+                ),
+            },
+            method="post",
+        )
+
+    def get_template_parameters(self) -> dict:
+        """
+        Чтобы получить данные о шаблонах отчетов
+        URL: https://sdk.wialon.com/wiki/ru/pro/remoteapi/apiref/report/get_report_data
+        """
+        logger.debug(f"{self.get_templates() = }")
+        return {
+            "svc": "report/get_report_data",
+            "params": {"itemId": self.user_id, "col": ["2"], "flags": 0},
+        }
 
     def _get_sensors(self, object_id: int) -> dict:
         """
@@ -126,7 +246,6 @@ class WialonInfo(WialonLogin):
                 "params": json.dumps({"id": object_id, "flags": "0x00001000"}),
             },
         )
-        logger.debug(f"Датчики: {sensors}")
 
         if "error" in sensors or sensors is None:
             raise Exception()
@@ -181,58 +300,6 @@ class WialonInfo(WialonLogin):
         )
         return response
 
-    def get_sensors_statistics(self, object_id: int, flag: str) -> dict:
-        try:
-
-            sensors = self._get_sensors(object_id)
-            test_sensors = _rebuilding_sensor_format(sensors)
-            
-            self._remove_layer()
-            timeFrom, timeTo = get_time_start_and_end(flag)
-            messages = self._create_messages_layer(object_id, timeFrom, timeTo)
-            
-            if messages is None or messages.get("error") == 1001:
-                return {"regtime-time":{"name":"Потеря сотовой связи", "type":"custom", "param":"regtime-time", "data":{"?":"Возможны проблемы с датчиком"}}}
-
-            max_index, min_index = calculation_max_and_min_index(
-                messages["units"][0]["msgs"]["count"]
-            )
-            logger.debug(f" Индексы min: {min_index} | max: {max_index} ")
-
-            
-            statistics = self.send_wialon_request(
-                "wialon/ajax.html",
-                {
-                    "svc": "core/batch",
-                    "sid": self.sid,
-                    "params": json.dumps(
-                        {
-                            "params": [
-                                {
-                                    "svc": "render/get_messages",
-                                    "params": {
-                                        "layerName": "messages",
-                                        "indexFrom": min_index,
-                                        "indexTo": max_index,
-                                        "unitId": object_id,
-                                    },
-                                }
-                            ],
-                            "flags": 0,
-                        }
-                    ),
-                },
-                method="post",
-            )
-
-            statistics = exception_sensors_data(test_sensors, statistics)
-            logger.debug(f"statistics: {statistics}")
-
-
-            return statistics
-        except Exception as e:
-            logger.opt(exception=e).critical("Ошибка в получении датчиков")
-
     def __get_clenup_params(self) -> dict:
         """
         Одновременно в сессии может быть выполнен только один отчет,
@@ -241,43 +308,6 @@ class WialonInfo(WialonLogin):
         URL: https://sdk.wialon.com/wiki/ru/sidebar/remoteapi/apiref/report/cleanup_result
         """
         return {"svc": "report/cleanup_result", "params": {}}
-
-    def get_templates(self):
-        """
-        Получить все существующие шаблоны
-        URL: https://sdk.wialon.com/wiki/ru/local/remoteapi2304/apiref/core/update_data_flags
-        """
-        return self.send_wialon_request(
-            add_to_sdk_url="wialon/ajax.html",
-            post_data={
-                "svc": "core/update_data_flags",
-                "sid": self.sid,
-                "params": json.dumps(
-                    {
-                        "spec": [
-                            {
-                                "type": "type",
-                                "data": "avl_resource",
-                                "flags": 8389121,
-                                "mode": 1,
-                            }
-                        ]
-                    }
-                ),
-            },
-            method="post",
-        )
-
-    def get_template_parameters(self) -> dict:
-        """
-        Чтобы получить данные о шаблонах отчетов
-        URL: https://sdk.wialon.com/wiki/ru/pro/remoteapi/apiref/report/get_report_data
-        """
-        logger.debug(f"{self.get_templates() = }")
-        return {
-            "svc": "report/get_report_data",
-            "params": {"itemId": self.user_id, "col": ["2"], "flags": 0},
-        }
 
     def _batch_request(self, params_l: list[dict]) -> list[dict]:
         """
@@ -408,21 +438,6 @@ class WialonInfo(WialonLogin):
             },
             method="post",
         )
-
-    def fuel_report(self, object_id: int, flag: str, date_start: str, date_end: str):
-
-        batch_params = [self.__get_clenup_params(), self.get_template_parameters()]
-        batch_response = self._batch_request(batch_params)
-        logger.debug(f"batch_response: {batch_response}")
-
-        exec_response = self._exec_request(object_id, flag, date_start, date_end)
-        apply_report_result = self._check_report_status()
-
-        if apply_report_result is None:
-            raise Exception("Ошибка применения результата отчета")
-
-        json_response = self._get_render_json()
-        return json_response
 
     def get_last_events(self):
         return self.send_wialon_request("avl_evts", {"sid": self.sid})

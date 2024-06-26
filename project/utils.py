@@ -101,18 +101,19 @@ def calculation_total_fuel_difference(data: list[dict]) -> int:
 
 
 def calculation_max_and_min_index(count: int | float) -> Tuple[int, int]:
-    if count - 500 >= 0: 
-        return count - 1, count - 500
+    """ Сначала возвращает максимальное значение, после минимальное """
+    logger.debug(f"{count = }")
+    if count - 300 >= 0: 
+        return count - 1, count - 300
     if count - 100 >= 0: 
         return count - 1, count - 100
-    
-    return count - 1, count - 50
+    return count - 1, 0
 
 
 def _rebuilding_sensor_format(sensors: dict) -> dict:
     sensors_ = {"params_with_error": set()}
 
-    for key, item in sensors.items():
+    for _, item in sensors.items():
         name = item.get("n")
         type_ = item.get("t")
         param = item.get("p")
@@ -138,4 +139,12 @@ def exception_sensors_data(sensors_: dict, data: list):
 
                     logger.debug(f"Найдена ошибка в датчике топлива: {value} at {time}")
     return sensors_
-       
+
+
+def get_start_param_from_session(request):
+    """ TODO: унифицировать """
+    sdk_url = request.session.get("wialon_sdk_url", "")
+    sid = request.session.get("wialon_sid", "")
+    user_id = request.session.get("user_id", "")
+
+    return sdk_url, sid, user_id

@@ -4,7 +4,7 @@ from django.shortcuts import render, redirect
 from django.conf import settings
 from loguru import logger
 
-from project.utils import calculation_fuel_theft, calculation_total_fuel_difference
+from project.utils import calculation_fuel_theft, calculation_total_fuel_difference, get_start_param_from_session
 
 from .wialon import *
 
@@ -19,9 +19,7 @@ def home_index(request):
         }
         return render(request, "home/auth.html", context)
 
-    sdk_url = request.session.get("wialon_sdk_url", "")
-    sid = request.session.get("wialon_sid", "")
-    user_id = request.session.get("user_id", "")
+    sdk_url, sid, user_id = get_start_param_from_session(request)
 
     new_wialon_devices_info = WialonInfo(sdk_url, sid, user_id)
     devices = new_wialon_devices_info.get_user_devices()
@@ -61,8 +59,10 @@ def wialon_recv_auth(request):
     logger.debug(f"{request.session.items() = }")
     if not svc_error == 0:
         return HttpResponse(f"failed to auth: error {svc_error}")
+    
     sdk_url = request.GET.get("wialon_sdk_url", None)
     auth_token = request.GET.get("access_token", None)
+
     if sdk_url is None or auth_token is None:
         return HttpResponse("forbidden")
     new_wialon_login = WialonLogin(sdk_url=sdk_url, auth_token=auth_token)
@@ -96,9 +96,7 @@ def get_sensors_statistics(request, object_id) -> dict:
 
 
 def fuel_report(request, object_id) -> dict:
-    sdk_url = request.session.get("wialon_sdk_url", "")
-    sid = request.session.get("wialon_sid", "")
-    user_id = request.session.get("user_id", "")
+    sdk_url, sid, user_id = get_start_param_from_session(request)
 
     flag = request.GET.get("flag", "0x04")
     date_start = request.GET.get("start", "0")
@@ -126,13 +124,22 @@ def fuel_report(request, object_id) -> dict:
     return render(request, "report/fuel.html", context)
 
 
+def fuel_report_for_all(request) -> dict:
+    sdk_url, sid, user_id = get_start_param_from_session(request)
+    new_wialon_devices_info = WialonInfo(sdk_url, sid, user_id)
+
+    flag = request.GET.get("flag", "0x02")
+    date_start = request.GET.get("start", "0")
+    date_end = request.GET.get("end", "1")
+    _ = new_wialon_devices_info.fuel_report_for_all(flag, date_start, date_end)
+
+    return HttpResponse(str(_))
+
 def get_data_from_sensor(request) -> dict:
     """
     https://sdk.wialon.com/wiki/ru/sidebar/remoteapi/apiref/unit/update_sensor
     """
-    sdk_url = request.session.get("wialon_sdk_url", "")
-    sid = request.session.get("wialon_sid", "")
-    user_id = request.session.get("user_id", "")
+    sdk_url, sid, user_id = get_start_param_from_session(request)
 
     new_wialon_devices_info = WialonInfo(sdk_url, sid, user_id)
     devices = new_wialon_devices_info.get_user_devices()

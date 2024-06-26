@@ -12,7 +12,7 @@
             <div class="collapse navbar-collapse" id="mynavbar">
             <ul class="navbar-nav me-auto">
                 <li class="nav-item">
-                <a class="nav-link" href="{% url 'home_index' %}">Link</a></a>
+                <a class="nav-link" href="{% url 'fuel_report_for_all' %}">Отчет</a></a>
                 </li>
                 <li class="nav-item">
                 <a class="nav-link" href="{% url 'home_index' %}">Link</a></a>
@@ -22,10 +22,6 @@
                 </li>
                 
             </ul>
-            <form class="d-flex">
-                <input class="form-control me-2" type="text" placeholder="Поиск">
-                <button class="btn btn-primary" type="button">Поиск</button>
-            </form>
             </div>
         </div>
 {% endblock navigation %}
@@ -70,5 +66,8 @@
         window.addEventListener('load', (event) => {
             query_wialon_get_last_events();
         });
+
+        
+
     </script>
 {% endblock js_scripts %}
