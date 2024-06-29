@@ -1,32 +1,5 @@
-{% extends 'template.html' %}
+{% extends 'header.html' %}
 {% load static %}
-
-{% block navigation %}
-  <div class="container-fluid">
-    <a class="navbar-brand" href="{% url 'home_index' %}">
-      <img src="{% static 'img/user_icon.svg' %}" alt="Avatar Logo" style="width:40px;" class="rounded-pill" />
-      <span class="navbar-text">{{ wialon_user }}</span>
-    </a>
-
-    <div class="collapse navbar-collapse" id="mynavbar">
-      <ul class="navbar-nav me-auto">
-        <li class="nav-item">
-          <a class="nav-link" href="{% url 'home_index' %}">Link</a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link" href="{% url 'home_index' %}">Link</a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link" href="{% url 'home_index' %}">Link</a>
-        </li>
-      </ul>
-      <form class="d-flex">
-        <input class="form-control me-2" type="text" placeholder="Поиск" />
-        <button class="btn btn-primary" type="button">Поиск</button>
-      </form>
-    </div>
-  </div>
-{% endblock %}
 
 {% block content %}
   <div class="container-fluid">
@@ -306,7 +279,7 @@
         const endUnix = toUnixTimestamp(endDateTime)
     
         // Perform AJAX request or redirect with date parameters in UNIX format
-        const url = "{% url 'fuel_report' object_id %}?flag=0x00" + '&start=' + startUnix + '&end=' + endUnix
+        const url = "{% url 'report' object_id %}?flag=0x00" + '&start=' + startUnix + '&end=' + endUnix
         window.location.href = url
       })
     })
@@ -382,11 +355,11 @@
           break
     
         default:
-          const url = "{% url 'fuel_report' object_id %}"
+          const url = "{% url 'report' object_id %}"
           window.location.href = url
           break
       }
-      const url = "{% url 'fuel_report' object_id %}?flag=" + wialon_flag + '&start=' + start + '&end=' + end
+      const url = "{% url 'report' object_id %}?flag=" + wialon_flag + '&start=' + start + '&end=' + end
       window.location.href = url
     }
   </script>

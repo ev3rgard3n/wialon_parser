@@ -1,0 +1,291 @@
+{% extends 'header.html' %}
+{% load static %}
+
+{% block content %}
+<style>
+    .spinner-border {
+        width: 3rem;
+        height: 3rem;
+        margin: 0 auto;
+        display: block;
+    }
+
+    .sortable th {
+        cursor: pointer;
+    }
+</style>
+
+<div class="container mt-5">
+    <div class="d-flex justify-content-between align-items-center">
+        <div class="btn-group" role="group" aria-label="Basic outlined example">
+            <button onclick="setInterval('yesterday')" type="button" class="btn btn-outline-primary" title="За вчера с 00:00 до 23:59">Вчера</button>
+            <button onclick="setInterval('today')" type="button" class="btn btn-outline-primary" title="За сегодня с 00:00 до настоящего момента">Сегодня</button>
+            <button onclick="setInterval('last_week')" type="button" class="btn btn-outline-primary" title="За прошлую неделю">Неделя</button>
+            <button onclick="setInterval('last_month')" type="button" class="btn btn-outline-primary" title="За прошлый месяц">Месяц</button>
+        </div>
+    </div>
+
+    <div class="container mt-5">
+        <h2>Таблица ошибок в датчиках</h2>
+        <button onclick="resetTable('sensor-table')" type="button" class="btn btn-secondary mb-3">Сбросить сортировку</button>
+        <table class="table table-danger sortable" id="sensor-table">
+            <thead>
+                <tr>
+                    <th scope="col" data-sort="number">ID машины</th>
+                    <th scope="col" data-sort="string">Название машины</th>
+                    <th scope="col" data-sort="string">Название датчика</th>
+                    <th scope="col" data-sort="string">Тип датчика</th>
+                    <th scope="col" data-sort="string">Параметр</th>
+                    <th scope="col" data-sort="number">Значение</th>
+                    <th scope="col" data-sort="date">Время</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+        <div id="sensor-loader" class="spinner-border" role="status" style="display: none;">
+            <span class="sr-only"></span>
+        </div>
+        <div id="no-sensor-errors" style="display: none;"><h3>Ошибки в датчиках отсутствуют</h3></div>
+    </div>
+
+    <div class="container mt-5">
+        <h2>Таблица слива топлива</h2>
+        <button onclick="resetTable('fuel-table')" type="button" class="btn btn-secondary mb-3">Сбросить сортировку</button>
+        <table class="table table-danger sortable" id="fuel-table">
+            <thead>
+                <tr>
+                    <th scope="col" data-sort="number">ID машины</th>
+                    <th scope="col" data-sort="string">Название машины</th>
+                    <th scope="col" data-sort="date">Время слива</th>
+                    <th scope="col" data-sort="number">Количество до</th>
+                    <th scope="col" data-sort="number">Количество после</th>
+                    <th scope="col" data-sort="number">Объем слива</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+        <div id="fuel-loader" class="spinner-border" role="status" style="display: none;">
+            <span class="sr-only"></span>
+        </div>
+        <div id="no-fuel-errors" style="display: none;"><h3>Ошибки в сливе топлива отсутствуют</h3></div>
+    </div>
+{% endblock content %}
+
+{% block js_scripts %}
+<script>
+    $(document).ready(function() {
+        loadSensorData();
+        loadFuelData();
+
+        // Add sorting functionality to all tables with the class 'sortable'
+        $(".sortable th").on("click", function() {
+            var table = $(this).parents("table.sortable");
+            var tbody = table.find("tbody");
+            var rows = tbody.find("tr").toArray();
+            var index = $(this).index();
+            var sortType = $(this).data("sort");
+            var order = $(this).data("order") === "desc" ? "asc" : "desc";
+
+            rows.sort(function(a, b) {
+                var cellA = $(a).find("td").eq(index).text();
+                var cellB = $(b).find("td").eq(index).text();
+
+                if (sortType === "number") {
+                    cellA = parseFloat(cellA);
+                    cellB = parseFloat(cellB);
+                } else if (sortType === "date") {
+                    cellA = new Date(cellA);
+                    cellB = new Date(cellB);
+                }
+
+                if (order === "asc") {
+                    return cellA > cellB ? 1 : cellA < cellB ? -1 : 0;
+                } else {
+                    return cellA < cellB ? 1 : cellA > cellB ? -1 : 0;
+                }
+            });
+
+            $.each(rows, function(index, row) {
+                tbody.append(row);
+            });
+
+            $(this).data("order", order);
+        });
+    });
+
+    async function query_wialon_get_last_events() {
+        let response = await fetch('/api/wialon/get_last_events/');
+        let data = await response.json();
+        
+        if ('error' in data) {
+            let response = await fetch('logout/');
+            window.location.reload();
+        }
+
+        setTimeout(query_wialon_get_last_events, 120000);
+    }
+
+    window.addEventListener('load', (event) => {
+        query_wialon_get_last_events();
+    });
+
+    function loadSensorData(params = {}) {
+        $("#sensor-loader").show();
+        $.ajax({
+            url: "{% url 'sensors_report_for_all' %}",
+            method: "GET",
+            data: params,
+            success: function(data) {
+                $("#sensor-loader").hide();
+                if (data.devices_with_problem && data.devices_with_problem.length > 0) {
+                    let tbody = $("#sensor-table tbody");
+                    tbody.empty();
+
+                    $.each(data, function(device_id, device_value) {
+                        if ($.inArray(device_id.toString(), data.devices_with_problem.map(String)) !== -1) {
+                            $.each(device_value.sensors, function(sensor_name, sensor_value) {
+                                if (sensor_name !== "params_with_error") {
+                                    $.each(sensor_value.data, function(data_time, data_value) {
+                                        tbody.append(
+                                            `<tr>
+                                                <th scope="row">${device_id}</th>
+                                                <td>${device_value.name}</td>
+                                                <td>${sensor_value.name}</td>
+                                                <td>${sensor_value.type}</td>
+                                                <td>${sensor_value.param}</td>
+                                                <td>${data_value}</td>
+                                                <td>${data_time}</td>
+                                            </tr>`
+                                        );
+                                    });
+                                }
+                            });
+                        }
+                    });
+                } else {
+                    $("#no-sensor-errors").show();
+                }
+            },
+            error: function(xhr, status, error) {
+                $("#sensor-loader").hide();
+                console.error("Error loading sensor data:", error);
+            }
+        });
+    }
+
+    function loadFuelData(params = {}) {
+        $("#fuel-loader").show();
+        $.ajax({
+            url: "{% url 'fuel_report_for_all' %}",
+            method: "GET",
+            data: params,
+            success: function(data) {
+                $("#fuel-loader").hide();
+                if (data.devices_with_problem && data.devices_with_problem.length > 0) {
+                    let tbody = $("#fuel-table tbody");
+                    tbody.empty();
+                    $.each(data, function(device_id, device_value) {
+                        if ($.inArray(parseInt(device_id), data.devices_with_problem) !== -1) {
+                            $.each(device_value.fuel_theft, function(index, fuel_theft) {
+                                tbody.append(
+                                    `<tr>
+                                        <th scope="row">${device_id}</th>
+                                        <td>${device_value.name}</td>
+                                        <td>${fuel_theft.time_of_theft}</td>
+                                        <td>${fuel_theft.fuel_before_theft}</td>
+                                        <td>${fuel_theft.fuel_during_theft}</td>
+                                        <td>${fuel_theft.fuel_difference}</td>
+                                    </tr>`
+                                );
+                            });
+                        }
+                    });
+                } else {
+                    $("#no-fuel-errors").show();
+                }
+            },
+            error: function(xhr, status, error) {
+                $("#fuel-loader").hide();
+                console.error("Error loading fuel data:", error);
+            }
+        });
+    }
+
+    function resetTable(tableId) {
+        var table = document.getElementById(tableId);
+        var rows = Array.from(table.querySelectorAll("tbody tr"));
+        rows.sort(function(a, b) {
+            return a.getAttribute("data-index") - b.getAttribute("data-index");
+        });
+        rows.forEach(function(row) {
+            table.querySelector("tbody").appendChild(row);
+        });
+    }
+
+    function getEndOfDayFormatted() {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const endOfDay = `${year}-${month}-${day} 23:59:59`;
+        return endOfDay;
+    }
+
+    function getStartOfDayFormatted() {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const startOfDay = `${year}-${month}-${day} 00:00:00`;
+        return startOfDay;
+    }
+
+    function toUnixTimestamp(dateString) {
+        return Math.floor(new Date(dateString).getTime() / 1000);
+    }
+
+    function setInterval(flag) {
+        let wialon_flag, start, end
+    
+        switch (flag) {
+            case 'yesterday':
+                wialon_flag = '0x02';
+                start = '0';
+                end = '1';
+                break;
+    
+            case 'today':
+                wialon_flag = '0x00';
+                start = toUnixTimestamp(getStartOfDayFormatted());
+                end = toUnixTimestamp(getEndOfDayFormatted());
+                break;
+    
+            case 'last_week':
+                wialon_flag = '0x04';
+                start = '0';
+                end = '1';
+                break;
+    
+            case 'last_month':
+                wialon_flag = '0x08';
+                start = '0';
+                end = '1';
+                break;
+    
+            default:
+                loadSensorData();
+                loadFuelData();
+                break;
+        }
+        if (start && end) {
+            const params = {
+                flag: wialon_flag,
+                start: start,
+                end: end
+            };
+            loadSensorData(params);
+            loadFuelData(params);
+        }
+    }
+</script>
+{% endblock js_scripts %}

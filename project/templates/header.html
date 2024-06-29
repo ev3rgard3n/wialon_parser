@@ -1,0 +1,20 @@
+{% extends 'template.html' %}
+{% load static %}
+
+{% block navigation %}
+    <div class="container-fluid">
+            <a class="navbar-brand" href="{% url 'home_index' %}">
+                <img src="{% static 'img/user_icon.svg' %}" alt="Avatar Logo" style="width:40px;" class="rounded-pill"> 
+                <span class="navbar-text">{{ wialon_user }}</span>
+            </a>
+
+            <div class="collapse navbar-collapse" id="mynavbar">
+            <ul class="navbar-nav me-auto">
+                <li class="nav-item">
+                    <a class="nav-link" href="{% url 'report_for_all' %}">Отчет</a></a>
+                </li>
+            </ul>
+        </div>
+{% endblock navigation %}
+
+

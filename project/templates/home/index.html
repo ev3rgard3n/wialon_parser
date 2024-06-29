@@ -1,52 +1,46 @@
-{% extends 'template.html' %}
+{% extends 'header.html' %}
 {% load static %}
-
-
-{% block navigation %}
-    <div class="container-fluid">
-            <a class="navbar-brand" href="{% url 'home_index' %}">
-                <img src="{% static 'img/user_icon.svg' %}" alt="Avatar Logo" style="width:40px;" class="rounded-pill"> 
-                <span class="navbar-text">{{ wialon_user }}</span>
-            </a>
-
-            <div class="collapse navbar-collapse" id="mynavbar">
-            <ul class="navbar-nav me-auto">
-                <li class="nav-item">
-                <a class="nav-link" href="{% url 'fuel_report_for_all' %}">Отчет</a></a>
-                </li>
-                <li class="nav-item">
-                <a class="nav-link" href="{% url 'home_index' %}">Link</a></a>
-                </li>
-                <li class="nav-item">
-                <a class="nav-link" href="{% url 'home_index' %}">Link</a></a>
-                </li>
-                
-            </ul>
-            </div>
-        </div>
-{% endblock navigation %}
 
 
 {% block content %}
     {% if "error" not in devices %}
-        <div class="row">
-            {% for key, device in devices.items %}
-                <div class="col-sm-4">
-                    <div class="card m-1">
-                        <div class="card-body">
-                            <h5 class="card-title">{{ device.id }}</h5>
-                            <p class="card-text">{{ device.name }}</p>
-                            <a href="{% url 'sensors' device.id %}" class="btn btn-primary">Подробнее</a>
+        <div class="d-flex justify-content-between align-items-center mb-5">
+            <div class="btn-group" role="group" aria-label="Basic outlined example">
+                {% for key in devices.keys %}
+                    <a href="#{{ key }}" class="btn btn-outline-primary">{{ key }}</a>
+                {% endfor %}
+            </div>
+        </div>
+
+        {% for key, device in devices.items %}
+            <div id="{{ key }}">
+                <h4 class="mt-3">{{ key }}</h4>
+                <div class="row">
+                    {% for device_key, device_value in device.items %}
+                    <div class="col-sm-3">
+                        <div class="card m-1">
+                            <div class="card-body">
+                                <h5 class="card-title">{{ device_value.id }}</h5>
+                                <p class="card-text">{{ device_value.name }}</p>
+                                <a href="{% url 'report' device_value.id %}" class="btn btn-primary">Подробнее</a>
+                            </div>
                         </div>
                     </div>
+                    {% endfor %}
                 </div>
+            </div>
         {% endfor %}
     {% else %}
         <div></div>
     {% endif %}
-        </div>
-{% endblock %}
 
+    <div class="d-flex justify-content-end">
+        <button type="button" class="btn btn-danger btn-floating btn-lg" id="btn-back-to-top">
+            <i class="fas fa-arrow-up"></i>
+        </button>
+    </div>
+    
+{% endblock %}
 
 {% block js_scripts %}
     <script>
@@ -67,7 +61,29 @@
             query_wialon_get_last_events();
         });
 
-        
+        // Кнопка "Наверх"
+        let mybutton = document.getElementById("btn-back-to-top");
 
+        window.onscroll = function () {
+            scrollFunction();
+        };
+
+        function scrollFunction() {
+            if (
+                document.body.scrollTop > 20 ||
+                document.documentElement.scrollTop > 20
+            ) {
+                mybutton.style.display = "block";
+            } else {
+                mybutton.style.display = "none";
+            }
+        }
+
+        mybutton.addEventListener("click", backToTop);
+
+        function backToTop() {
+            document.body.scrollTop = 0;
+            document.documentElement.scrollTop = 0;
+        }
     </script>
 {% endblock js_scripts %}

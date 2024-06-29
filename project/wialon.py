@@ -3,7 +3,7 @@ from loguru import logger
 import requests
 import json
 
-from project.utils import _rebuilding_sensor_format, calculation_max_and_min_index, exception_sensors_data, get_time_start_and_end
+from project.utils import _rebuilding_sensor_format, calculate_fuel_theft, calculation_max_and_min_index, calculate_total_fuel_difference, exception_sensors_data, get_time_start_and_end
 
 
 class WialonLogin:
@@ -80,9 +80,9 @@ class WialonInfo(WialonLogin):
         self.sid = sid
         self.user_id = user_id
 
-    def get_user_devices(self):
+    def get_user_devices(self, itemsType="avl_unit"):
         output = {}
-        a = self.send_wialon_request(
+        response = self.send_wialon_request(
             "wialon/ajax.html",
             {
                 "svc": "core/search_items",
@@ -90,7 +90,7 @@ class WialonInfo(WialonLogin):
                 "params": json.dumps(
                     {
                         "spec": {
-                            "itemsType": "avl_unit",
+                            "itemsType": itemsType,
                             "propName": "sys_name",
                             "propValueMask": "*",
                             "sortType": "sys_name",
@@ -103,10 +103,14 @@ class WialonInfo(WialonLogin):
                 ),
             },
         )
-        # logger.debug(f"{a = }")
-        if "error" in a:
-            return a
-        for item in a["items"]:
+        # logger.debug(f"{response = }")
+
+        if "error" in response:
+            return response
+        if itemsType == "avl_unit_group":
+            return response
+        
+        for item in response["items"]:
             output[item["id"]] = {
                 "id": item["id"],
                 "name": item["nm"],
@@ -114,14 +118,15 @@ class WialonInfo(WialonLogin):
         self.devices = output
         return output
 
-    def fuel_report(self, object_id: int, flag: str, date_start: str, date_end: str):
+    def fuel_report(self, object_id: int, flag: str, date_start: str, date_end: str) -> dict | None:
 
-        batch_params = [self.__get_clenup_params(), self.get_template_parameters()]
+        batch_params = [self.__get_clenup_params()]
         batch_response = self._batch_request(batch_params)
         logger.debug(f"batch_response: {batch_response}")
-
+        
         self._exec_request(object_id, flag, date_start, date_end)
         apply_report_result = self._check_report_status()
+
 
         if apply_report_result is None:
             raise Exception("Ошибка применения результата отчета")
@@ -129,15 +134,48 @@ class WialonInfo(WialonLogin):
         json_response = self._get_render_json()
         return json_response
 
-    def fuel_report_for_all(self, flag: str, dateStart: str, dateEnd: str): 
+    def sensor_statistics_report_for_all(self, flag: str): 
+        devices_with_problem = []
         devices = self.get_user_devices()
-        count = 0
+
         for device_id, device_info in devices.items():
             sensors_data = self.get_sensors_statistics(device_id, flag)
             device_info['sensors'] = sensors_data
-            count +=1
-            if count == 5: break
-        return devices          
+
+            if sensors_data["params_with_error"]: devices_with_problem.append(device_id)
+
+        devices["devices_with_problem"] = devices_with_problem
+        return devices   
+           
+    def fuel_report_for_all(self, flag: int, date_start: str, date_end: str) -> dict:
+        """
+        Получить отчет по топливу для всех устройств.
+
+        Args:
+            flag (int): Флаг для отчета по топливу.
+            date_start (str): Начальная дата.
+            date_end (str): Конечная дата.
+
+        Returns:
+            dict: Словарь устройств с добавленной информацией о кражах топлива.
+        """
+        devices_with_problem = []
+        fuel_theft_total = 0
+        devices = self.get_user_devices()
+
+        for device_id, device_info in devices.items():
+            json_response = self.fuel_report(device_id, flag, date_start, date_end)
+            data_for_table = calculate_fuel_theft(json_response)
+            fuel_theft = calculate_total_fuel_difference(data_for_table)
+
+            fuel_theft_total += fuel_theft
+            if data_for_table:
+                devices_with_problem.append(device_id)
+                device_info["fuel_theft"] =  data_for_table
+            
+        devices["devices_with_problem"] = devices_with_problem
+        devices["fuel_theft"] = fuel_theft_total
+        return devices       
 
     def get_sensors_statistics(self, object_id: int, flag: str) -> dict:
         try:
@@ -149,13 +187,11 @@ class WialonInfo(WialonLogin):
             timeFrom, timeTo = get_time_start_and_end(flag)
             messages = self._create_messages_layer(object_id, timeFrom, timeTo)
             
-            logger.debug(f"messages: {messages}")
-
             if messages is None or messages.get("error") == 1001:
                 logger.error(f"Error messages: {messages}")
-                return {"regtime-time":{"name":"Потеря сотовой связи", "type":"custom", "param":"regtime-time", "data":{"?":"Возможны проблемы с датчиком"}}}
+                return {"params_with_error": ["terminal"], "terminal":{"name":"Потеря сотовой связи", "type":"custom", "param":"terminal", "data":{f"{timeFrom}":"Нет сообщений для выбранного интервала"}}}
             if messages.get("error") == 6:
-                return None
+                return {"params_with_error": ["terminal"], "terminal":{"name":"Терминал", "type":"custom", "param":"terminal", "data":{f"{timeFrom}":"Терминал или ТС отсутвуют в системе"}}}
             
             max_index, min_index = calculation_max_and_min_index(
                 messages["units"][0]["msgs"]["count"]
@@ -163,36 +199,10 @@ class WialonInfo(WialonLogin):
             logger.debug(f" Индексы min: {min_index} | max: {max_index} ")
 
             
-            statistics = self.send_wialon_request(
-                "wialon/ajax.html",
-                {
-                    "svc": "core/batch",
-                    "sid": self.sid,
-                    "params": json.dumps(
-                        {
-                            "params": [
-                                {
-                                    "svc": "render/get_messages",
-                                    "params": {
-                                        "layerName": "messages",
-                                        "indexFrom": min_index,
-                                        "indexTo": max_index,
-                                        "unitId": object_id,
-                                    },
-                                }
-                            ],
-                            "flags": 0,
-                        }
-                    ),
-                },
-                method="post",
-            )
+            batch_params = [self.__get_render_messages_params(min_index, max_index, object_id)]
+            statistics = self._batch_request(batch_params)
 
-            logger.debug(f"statistics: {statistics}")
-            statistics = exception_sensors_data(test_sensors, statistics)
-
-
-            return statistics
+            return exception_sensors_data(test_sensors, statistics)
         except Exception as e:
             logger.opt(exception=e).critical("Ошибка в получении датчиков")
     
@@ -227,7 +237,6 @@ class WialonInfo(WialonLogin):
         Чтобы получить данные о шаблонах отчетов
         URL: https://sdk.wialon.com/wiki/ru/pro/remoteapi/apiref/report/get_report_data
         """
-        logger.debug(f"{self.get_templates() = }")
         return {
             "svc": "report/get_report_data",
             "params": {"itemId": self.user_id, "col": ["2"], "flags": 0},
@@ -307,7 +316,7 @@ class WialonInfo(WialonLogin):
         то перед выполнением следующего отчета их следует удалить командой report/cleanup_result:
         URL: https://sdk.wialon.com/wiki/ru/sidebar/remoteapi/apiref/report/cleanup_result
         """
-        return {"svc": "report/cleanup_result", "params": {}}
+        return {"svc":"report/cleanup_result","params":{}}
 
     def _batch_request(self, params_l: list[dict]) -> list[dict]:
         """
@@ -315,20 +324,21 @@ class WialonInfo(WialonLogin):
         URL: https://sdk.wialon.com/wiki/ru/sidebar/remoteapi/apiref/core/batch
         """
         try:
-            logger.debug(f"{params_l}")
-            data = {"params": params_l}
-            return self.send_wialon_request(
+            logger.debug(f"Параметры запроса: {params_l}")
+            data = {"params": params_l, "flags": 0}
+            response = self.send_wialon_request(
                 add_to_sdk_url="wialon/ajax.html",
                 post_data={
                     "svc": "core/batch",
                     "sid": self.sid,
-                    "params": json.dumps(data),
-                    "flags": 0,
+                    "params": json.dumps(data)
                 },
-                method="post",
+                method="post"
             )
+            return response
         except Exception as e:
-            logger.opt(exception=e).critical("Error ")
+            logger.opt(exception=e).critical("Ошибка при выполнении запроса")
+            return []
 
     def _exec_request(
         self, object_id: int, interval_flags: str, date_start: int, date_end: int
@@ -403,17 +413,27 @@ class WialonInfo(WialonLogin):
             report_status = self._get_report_status()
 
             if report_status["status"] == "4":
-                logger.debug(f"Tr {report_status = }")
                 return self._apply_report_result()
 
             elif report_status["status"] in ("1", "2"):
-                time.sleep(5)
+                time.sleep(1)
                 continue
 
             elif report_status["status"] in ("8", "16"):
                 break
 
         return None
+
+    def __get_render_messages_params(self, min_index, max_index, object_id):
+        return {
+            "svc": "render/get_messages",
+            "params": {
+                "layerName": "messages",
+                "indexFrom": min_index,
+                "indexTo": max_index,
+                "unitId": object_id,
+            }
+        }
 
     def _get_render_json(self) -> dict:
         """

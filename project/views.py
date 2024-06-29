@@ -1,11 +1,15 @@
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.contrib.auth import logout
 from django.shortcuts import render, redirect
 from django.conf import settings
 from loguru import logger
 
-from project.utils import calculation_fuel_theft, calculation_total_fuel_difference, get_start_param_from_session
-
+from project.utils import (
+    _rebuilding_devices_format,
+    calculate_fuel_theft,
+    calculate_total_fuel_difference,
+    get_start_param_from_session,
+)
 from .wialon import *
 
 
@@ -22,11 +26,14 @@ def home_index(request):
     sdk_url, sid, user_id = get_start_param_from_session(request)
 
     new_wialon_devices_info = WialonInfo(sdk_url, sid, user_id)
+    group = new_wialon_devices_info.get_user_devices("avl_unit_group")
     devices = new_wialon_devices_info.get_user_devices()
+    
+    rebuilding_devices =_rebuilding_devices_format(devices, group)
 
     output = {
         "wialon_user": request.session.get("wialon_user", None),
-        "devices": devices,
+        "devices": rebuilding_devices,
     }
 
     logger.debug(f"{request.session.items() = }")
@@ -59,7 +66,7 @@ def wialon_recv_auth(request):
     logger.debug(f"{request.session.items() = }")
     if not svc_error == 0:
         return HttpResponse(f"failed to auth: error {svc_error}")
-    
+
     sdk_url = request.GET.get("wialon_sdk_url", None)
     auth_token = request.GET.get("access_token", None)
 
@@ -78,12 +85,9 @@ def wialon_recv_auth(request):
 
 
 def get_sensors_statistics(request, object_id) -> dict:
-
     try:
-        sdk_url = request.session.get("wialon_sdk_url", "")
-        sid = request.session.get("wialon_sid", "")
+        sdk_url, sid, user_id = get_start_param_from_session(request)
 
-        user_id = request.session.get("user_id", "")
         flag = request.GET.get("flag", "0x04")
 
         new_wialon_devices_info = WialonInfo(sdk_url, sid, user_id)
@@ -107,8 +111,8 @@ def fuel_report(request, object_id) -> dict:
         object_id, flag, date_start, date_end
     )
 
-    data_for_table = calculation_fuel_theft(json_response)
-    fuel_theft = calculation_total_fuel_difference(data_for_table)
+    data_for_table = calculate_fuel_theft(json_response)
+    fuel_theft = calculate_total_fuel_difference(data_for_table)
 
     context = {
         "object_id": object_id,
@@ -124,22 +128,40 @@ def fuel_report(request, object_id) -> dict:
     return render(request, "report/fuel.html", context)
 
 
-def fuel_report_for_all(request) -> dict:
-    sdk_url, sid, user_id = get_start_param_from_session(request)
-    new_wialon_devices_info = WialonInfo(sdk_url, sid, user_id)
+def report_for_all(request):
+    return render(request, "report/report_for_all.html")
 
-    flag = request.GET.get("flag", "0x02")
-    date_start = request.GET.get("start", "0")
-    date_end = request.GET.get("end", "1")
-    _ = new_wialon_devices_info.fuel_report_for_all(flag, date_start, date_end)
 
-    return HttpResponse(str(_))
+def sensors_report_for_all(request):
+    try:
+        sdk_url, sid, user_id = get_start_param_from_session(request)
+        new_wialon_devices_info = WialonInfo(sdk_url, sid, user_id)
+        flag = request.GET.get("flag", "0x02")
+        
+        sensor_statistics = new_wialon_devices_info.sensor_statistics_report_for_all(
+            flag
+        )
+        return JsonResponse(sensor_statistics)
 
-def get_data_from_sensor(request) -> dict:
-    """
-    https://sdk.wialon.com/wiki/ru/sidebar/remoteapi/apiref/unit/update_sensor
-    """
-    sdk_url, sid, user_id = get_start_param_from_session(request)
+    except Exception as e:
+        logger.opt(exception=e).critical(str(e))
+        return JsonResponse(None)
 
-    new_wialon_devices_info = WialonInfo(sdk_url, sid, user_id)
-    devices = new_wialon_devices_info.get_user_devices()
+
+def fuel_report_for_all(request):
+    try:
+        sdk_url, sid, user_id = get_start_param_from_session(request)
+        new_wialon_devices_info = WialonInfo(sdk_url, sid, user_id)
+        flag = request.GET.get("flag", "0x02")
+        date_start = request.GET.get("start", "0")
+        date_end = request.GET.get("end", "1")
+
+        logger.debug(f"flag: {flag} | date_start: {date_start} | date_end {date_end}")
+
+        fuel_report = new_wialon_devices_info.fuel_report_for_all(
+            flag, date_start, date_end
+        )
+        return JsonResponse(fuel_report)
+    except Exception as e:
+        logger.opt(exception=e).critical(str(e))
+        return JsonResponse({"fuel_report": None})

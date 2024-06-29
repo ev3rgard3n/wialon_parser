@@ -50,68 +50,72 @@ def get_time_start_and_end(flag: str) -> int:
     return convert_to_unix(start), convert_to_unix(end)
 
 
-def calculation_fuel_theft(data: dict, type=256) -> list[dict]:
-    xData = data["datasets"]["0"]["data"]["x"]
-    yData = data["datasets"]["0"]["data"]["y"]
-    
-    fuel_values_before_and_during_theft = []
-    index_time_of_theft = []
+def calculate_fuel_theft(data: dict, type=256) -> list[dict]:
+    try:
+        if data.get("error"): return []
 
-    if "markers" in data:
-        # Время слива топлива
-        time_of_theft = [value for marker in data["markers"] if marker["type"] == type for value in marker["x"]]
+        xData = data["datasets"]["0"]["data"]["x"]
+        yData = data["datasets"]["0"]["data"]["y"]
         
-        # Индексы времени слива топлива
-        for x in time_of_theft:
-            if x in xData:
-                index_time_of_theft.append(xData.index(x))
-            else:
-                # Найти две ближайшие точки времени до и после
-                prev_time = max(filter(lambda y: y < x, xData), default=None)
-                next_time = min(filter(lambda y: y > x, xData), default=None)
-                
-                if prev_time is not None and next_time is not None:
-                    index_time_of_theft.append((xData.index(prev_time), xData.index(next_time)))
-                elif prev_time is not None:
-                    index_time_of_theft.append((xData.index(prev_time),))
-                elif next_time is not None:
-                    index_time_of_theft.append((xData.index(next_time),))
-        
-        # Извлечение значений топлива
         fuel_values_before_and_during_theft = []
-        for indices in index_time_of_theft:
-            if isinstance(indices, int):
-                indices = (indices,)  # Преобразовать в кортеж, если это одно целое число
-            for index in indices:
-                if 0 <= index < len(yData) and index + 1 < len(yData):
-                    fuel_value = {
-                        "time_of_theft": convert_unix_to_datetime(xData[index]),
-                        "fuel_before_theft": yData[index] if index > 0 else None,
-                        "fuel_during_theft": yData[index + 1],
-                        "fuel_difference": yData[index] - yData[index + 1] if index > 0 else None
-                    }
-                    fuel_values_before_and_during_theft.append(fuel_value)
+        index_time_of_theft = []
 
-    return fuel_values_before_and_during_theft
+        if "markers" in data:
+            # Время слива топлива
+            time_of_theft = [value for marker in data["markers"] if marker["type"] == type for value in marker["x"]]
+            
+            # Индексы времени слива топлива
+            for x in time_of_theft:
+                if x in xData:
+                    index_time_of_theft.append(xData.index(x))
+                else:
+                    # Найти две ближайшие точки времени до и после
+                    prev_time = max(filter(lambda y: y < x, xData), default=None)
+                    next_time = min(filter(lambda y: y > x, xData), default=None)
+                    
+                    if prev_time is not None and next_time is not None:
+                        index_time_of_theft.append((xData.index(prev_time), xData.index(next_time)))
+                    elif prev_time is not None:
+                        index_time_of_theft.append((xData.index(prev_time),))
+                    elif next_time is not None:
+                        index_time_of_theft.append((xData.index(next_time),))
+            
+            # Извлечение значений топлива
+            fuel_values_before_and_during_theft = []
+            for indices in index_time_of_theft:
+                if isinstance(indices, int):
+                    indices = (indices,)  # Преобразовать в кортеж, если это одно целое число
+                for index in indices:
+                    if 0 <= index < len(yData) and index + 1 < len(yData):
+                        fuel_value = {
+                            "time_of_theft": convert_unix_to_datetime(xData[index]),
+                            "fuel_before_theft": round(yData[index], 2) if index > 0 else None,
+                            "fuel_during_theft": round(yData[index + 1], 2),
+                            "fuel_difference": round(yData[index] - yData[index + 1], 2) if index > 0 else 0
+                        }
+                        fuel_values_before_and_during_theft.append(fuel_value)
+
+        return fuel_values_before_and_during_theft
+    except Exception as e:
+        logger.opt(exception=e).critical("Ошибка в вычислении слива")
+        return []
 
 
-
-def calculation_total_fuel_difference(data: list[dict]) -> int:
-    return sum([float(item["fuel_difference"]) for item in data])
+def calculate_total_fuel_difference(data: list[dict]) -> int:
+    return round(sum([float(item["fuel_difference"]) for item in data]), 2)
 
 
 def calculation_max_and_min_index(count: int | float) -> Tuple[int, int]:
     """ Сначала возвращает максимальное значение, после минимальное """
-    logger.debug(f"{count = }")
-    if count - 300 >= 0: 
-        return count - 1, count - 300
+    if count - 200 >= 0: 
+        return count - 1, count - 200
     if count - 100 >= 0: 
         return count - 1, count - 100
     return count - 1, 0
 
 
 def _rebuilding_sensor_format(sensors: dict) -> dict:
-    sensors_ = {"params_with_error": set()}
+    sensors_ = {"params_with_error": []}
 
     for _, item in sensors.items():
         name = item.get("n")
@@ -133,9 +137,10 @@ def exception_sensors_data(sensors_: dict, data: list):
 
             if key in sensors_ and sensors_[key]['type'] == 'fuel level':
                 if value > 4096 or value == 65535 or value <= 0:
-                    sensors_[key]["data"][time] = value
-                    sensors_["params_with_error"].add(key)
                     time = convert_unix_to_datetime(item["t"])
+                    sensors_[key]["data"][time] = value
+                    if key not in sensors_["params_with_error"]:
+                        sensors_["params_with_error"].append(key)
 
                     logger.debug(f"Найдена ошибка в датчике топлива: {value} at {time}")
     return sensors_
@@ -148,3 +153,13 @@ def get_start_param_from_session(request):
     user_id = request.session.get("user_id", "")
 
     return sdk_url, sid, user_id
+
+def _rebuilding_devices_format(devices: dict, groups: dict) -> dict:
+    rebuilding_devices = {
+        group["nm"]: {
+            str(device_id): devices.get(device_id, None)
+            for device_id in group["u"]
+        }
+        for group in groups["items"]
+    } 
+    return rebuilding_devices
