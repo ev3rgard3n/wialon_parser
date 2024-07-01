@@ -116,11 +116,11 @@
       let data = await response.json()
     
       if ('error' in data) {
-        let response = await fetch('logout/')
+        let response = await fetch('')
         window.location.reload()
       }
     
-      setTimeout(query_wialon_get_last_events, 120000)
+      setTimeout(query_wialon_get_last_events, 60000)
     }
     
     window.addEventListener('load', (event) => {

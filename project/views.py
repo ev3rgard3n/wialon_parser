@@ -4,6 +4,7 @@ from django.shortcuts import render, redirect
 from django.conf import settings
 from loguru import logger
 
+from project import apis
 from project.utils import (
     _rebuilding_devices_format,
     calculate_fuel_theft,
@@ -14,15 +15,10 @@ from .wialon import *
 
 
 def home_index(request):
-    required_keys = {"wialon_sdk_url", "wialon_sid", "wialon_user", "wialon_user_ip"}
-
-    if not required_keys.issubset(request.session.keys()):
-        context = {
-            "client_id": settings.WIALON_APP_NAME,
-            "redirect_url": settings.WIALON_BACK_URL,
-        }
-        return render(request, "home/auth.html", context)
-
+    session_check = check_session_status(request)
+    if session_check:
+        return session_check
+    
     sdk_url, sid, user_id = get_start_param_from_session(request)
 
     new_wialon_devices_info = WialonInfo(sdk_url, sid, user_id)
@@ -35,17 +31,18 @@ def home_index(request):
         "wialon_user": request.session.get("wialon_user", None),
         "devices": rebuilding_devices,
     }
-
-    logger.debug(f"{request.session.items() = }")
     return render(request, "home/index.html", output)
 
 
 def logout_user(request):
     logout(request)
+    return redirect("login")
+
+def login(request):
     context = {
-        "client_id": settings.WIALON_APP_NAME,
-        "redirect_url": settings.WIALON_BACK_URL,
-    }
+            "client_id": settings.WIALON_APP_NAME,
+            "redirect_url": settings.WIALON_BACK_URL,
+        }
     return render(request, "home/auth.html", context)
 
 
@@ -86,6 +83,9 @@ def wialon_recv_auth(request):
 
 def get_sensors_statistics(request, object_id) -> dict:
     try:
+        session_check = check_session_status(request)
+        if session_check:
+            return session_check
         sdk_url, sid, user_id = get_start_param_from_session(request)
 
         flag = request.GET.get("flag", "0x04")
@@ -96,10 +96,14 @@ def get_sensors_statistics(request, object_id) -> dict:
         return render(request, "report/sensors.html", {"statistics": statistics})
     except Exception as e:
         logger.opt(exception=e).critical(str(e))
-        return None
+        return JsonResponse({"error": str(e)})
 
 
 def fuel_report(request, object_id) -> dict:
+    session_check = check_session_status(request)
+    if session_check:
+        return session_check
+    
     sdk_url, sid, user_id = get_start_param_from_session(request)
 
     flag = request.GET.get("flag", "0x04")
@@ -122,14 +126,27 @@ def fuel_report(request, object_id) -> dict:
         "fuel_theft": fuel_theft,
         "statistics": new_wialon_devices_info.get_sensors_statistics(object_id, flag),
     }
-
-    logger.debug(f"context: {context}")
-
     return render(request, "report/fuel.html", context)
 
 
 def report_for_all(request):
-    return render(request, "report/report_for_all.html")
+    session_check = check_session_status(request)
+    if session_check:
+        return session_check
+
+    sdk_url, sid, user_id = get_start_param_from_session(request)
+
+    new_wialon_devices_info = WialonInfo(sdk_url, sid, user_id)
+    group = new_wialon_devices_info.get_user_devices("avl_unit_group")
+    devices = new_wialon_devices_info.get_user_devices()
+    
+    rebuilding_devices =_rebuilding_devices_format(devices, group)
+
+    context = {
+        "wialon_user": request.session.get("wialon_user", None),
+        "devices": rebuilding_devices,
+    }
+    return render(request, "report/report_for_all.html", context)
 
 
 def sensors_report_for_all(request):
@@ -137,9 +154,10 @@ def sensors_report_for_all(request):
         sdk_url, sid, user_id = get_start_param_from_session(request)
         new_wialon_devices_info = WialonInfo(sdk_url, sid, user_id)
         flag = request.GET.get("flag", "0x02")
+        group_type = request.GET.get("group", "all")
         
         sensor_statistics = new_wialon_devices_info.sensor_statistics_report_for_all(
-            flag
+            flag, group_type
         )
         return JsonResponse(sensor_statistics)
 
@@ -152,16 +170,35 @@ def fuel_report_for_all(request):
     try:
         sdk_url, sid, user_id = get_start_param_from_session(request)
         new_wialon_devices_info = WialonInfo(sdk_url, sid, user_id)
+
         flag = request.GET.get("flag", "0x02")
         date_start = request.GET.get("start", "0")
         date_end = request.GET.get("end", "1")
-
-        logger.debug(f"flag: {flag} | date_start: {date_start} | date_end {date_end}")
+        group_type = request.GET.get("group", "all")
 
         fuel_report = new_wialon_devices_info.fuel_report_for_all(
-            flag, date_start, date_end
+            flag, date_start, date_end, group_type
         )
         return JsonResponse(fuel_report)
-    except Exception as e:
+    except Exception as e:  
         logger.opt(exception=e).critical(str(e))
         return JsonResponse({"fuel_report": None})
+
+
+def check_session_status(request):
+    required_keys = {"wialon_sdk_url", "wialon_sid", "wialon_user", "wialon_user_ip"}
+    session_ = apis.api_wialon_get_last_events(request)
+    logger.debug(f"{session_.content}")
+    
+    try:
+        session_data = json.loads(session_.content.decode())
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error: {e}")
+        return redirect("login")
+    
+    if not required_keys.issubset(request.session.keys()):
+        return redirect("login")
+    if session_data.get("error") == 1:
+        return redirect("login")
+    
+    return None

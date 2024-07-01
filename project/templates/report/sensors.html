@@ -47,27 +47,15 @@
 {% block js_scripts %}
 <script>
     async function query_wialon_get_last_events() {
-        try {
-            let response = await fetch('/api/wialon/get_last_events/');
-            let data = await response.json();
-            
-            if ('error' in data) {
-                console.log("Error in data received from API:", data);
-                let logoutResponse = await fetch('logout/');
-                if (logoutResponse.ok) {
-                    console.log("Logged out successfully, reloading page.");
-                    window.location.reload();
-                } else {
-                    console.error("Failed to log out");
-                }
-            } else {
-                console.log("Data received from API:", data);
-            }
-        } catch (error) {
-            console.error("Error during fetch operation:", error);
-        } finally {
-            setTimeout(query_wialon_get_last_events, 120000);
+        let response = await fetch('/api/wialon/get_last_events/');
+        let data = await response.json();
+        
+        if ('error' in data) {
+            let response = await fetch('');
+            window.location.reload();
         }
+
+        setTimeout(query_wialon_get_last_events, 60000);
     }
 
     window.addEventListener('load', (event) => {

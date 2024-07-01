@@ -2,27 +2,40 @@
 {% load static %}
 
 {% block content %}
-<style>
-    .spinner-border {
-        width: 3rem;
-        height: 3rem;
-        margin: 0 auto;
-        display: block;
-    }
-
-    .sortable th {
-        cursor: pointer;
-    }
-</style>
-
-<div class="container mt-5">
-    <div class="d-flex justify-content-between align-items-center">
-        <div class="btn-group" role="group" aria-label="Basic outlined example">
-            <button onclick="setInterval('yesterday')" type="button" class="btn btn-outline-primary" title="За вчера с 00:00 до 23:59">Вчера</button>
-            <button onclick="setInterval('today')" type="button" class="btn btn-outline-primary" title="За сегодня с 00:00 до настоящего момента">Сегодня</button>
-            <button onclick="setInterval('last_week')" type="button" class="btn btn-outline-primary" title="За прошлую неделю">Неделя</button>
-            <button onclick="setInterval('last_month')" type="button" class="btn btn-outline-primary" title="За прошлый месяц">Месяц</button>
+    <div class="container mt-5">
+        <h6>Создать общий отчет</h6>
+        <div class="d-flex justify-content-between align-items-center">
+            <div class="btn-group" role="group" aria-label="Basic outlined example">
+                <button onclick="setInterval('yesterday')" type="button" class="btn btn-outline-primary" title="За вчера с 00:00 до 23:59">Вчера</button>
+                <button onclick="setInterval('today')" type="button" class="btn btn-outline-primary" title="За сегодня с 00:00 до настоящего момента">Сегодня</button>
+                <button onclick="setInterval('last_week')" type="button" class="btn btn-outline-primary" title="За прошлую неделю">Неделя</button>
+            </div>
         </div>
+    </div>
+
+    <div class="m-4"></div>
+
+    <div class="container mt-5">
+        <form id="report-form">
+            <h6>Создать отчет по группе</h6>
+            <div class="d-flex flex-column">
+                <div class="d-flex mb-3">
+                    <div class="btn-group me-3" role="group" aria-label="Basic outlined example">
+                        <button type="button" class="btn btn-outline-primary date-btn" data-date="yesterday" title="За вчера с 00:00 до 23:59">Вчера</button>
+                        <button type="button" class="btn btn-outline-primary date-btn" data-date="today" title="За сегодня с 00:00 до настоящего момента">Сегодня</button>
+                        <button type="button" class="btn btn-outline-primary date-btn" data-date="last_week" title="За прошлую неделю">Неделя</button>
+                    </div>
+                </div>
+                <div class="d-flex mb-3 align-items-center">
+                    <div class="btn-group me-3" role="group" aria-label="Basic outlined example">
+                        {% for key in devices.keys %}
+                            <button type="button" class="btn btn-outline-primary group-btn" data-group="{{ key }}" title="{{ key }}">{{ key }}</button>
+                        {% endfor %}
+                    </div>
+                    <button type="submit" class="btn btn-primary ms-auto">Создать отчет</button>
+                </div>
+            </div>
+        </form>
     </div>
 
     <div class="container mt-5">
@@ -31,7 +44,7 @@
         <table class="table table-danger sortable" id="sensor-table">
             <thead>
                 <tr>
-                    <th scope="col" data-sort="number">ID машины</th>
+                    <th scope="col" data-sort="number">ID</th>
                     <th scope="col" data-sort="string">Название машины</th>
                     <th scope="col" data-sort="string">Название датчика</th>
                     <th scope="col" data-sort="string">Тип датчика</th>
@@ -74,10 +87,31 @@
 {% block js_scripts %}
 <script>
     $(document).ready(function() {
-        loadSensorData();
-        loadFuelData();
+        $('.date-btn').click(function() {
+            $('.date-btn').removeClass('active');
+            $(this).addClass('active');
+        });
 
-        // Add sorting functionality to all tables with the class 'sortable'
+        $('.group-btn').click(function() {
+            $('.group-btn').removeClass('active');
+            $(this).addClass('active');
+        });
+
+        $('#report-form').submit(function(event) {
+            event.preventDefault();
+
+            const flag = $('.date-btn.active').data('date');
+            const selectedGroup = $('.group-btn.active').data('group');
+
+
+            if (!flag || !selectedGroup) {
+                alert('Пожалуйста, выберите группу и время.');
+                return;
+            }
+            setInterval(flag, selectedGroup);
+        });
+
+
         $(".sortable th").on("click", function() {
             var table = $(this).parents("table.sortable");
             var tbody = table.find("tbody");
@@ -118,11 +152,11 @@
         let data = await response.json();
         
         if ('error' in data) {
-            let response = await fetch('logout/');
+            let response = await fetch('');
             window.location.reload();
         }
 
-        setTimeout(query_wialon_get_last_events, 120000);
+        setTimeout(query_wialon_get_last_events, 60000);
     }
 
     window.addEventListener('load', (event) => {
@@ -244,7 +278,7 @@
         return Math.floor(new Date(dateString).getTime() / 1000);
     }
 
-    function setInterval(flag) {
+    function setInterval(flag, group="all") {
         let wialon_flag, start, end
     
         switch (flag) {
@@ -281,7 +315,8 @@
             const params = {
                 flag: wialon_flag,
                 start: start,
-                end: end
+                end: end,
+                group: group
             };
             loadSensorData(params);
             loadFuelData(params);

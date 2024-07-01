@@ -1,12 +1,22 @@
 import time
+from typing import Optional
 from loguru import logger
 import requests
 import json
 
-from project.utils import _rebuilding_sensor_format, calculate_fuel_theft, calculation_max_and_min_index, calculate_total_fuel_difference, exception_sensors_data, get_time_start_and_end
+from project.interfaces import WialonI
+from project.utils import (
+    _rebuilding_sensor_format,
+    calculate_fuel_theft,
+    calculation_max_and_min_index,
+    calculate_total_fuel_difference,
+    convert_unix_to_datetime,
+    exception_sensors_data,
+    get_time_start_and_end,
+)
 
 
-class WialonLogin:
+class WialonLogin(WialonI):
     def __init__(
         self,
         sdk_url,
@@ -48,8 +58,6 @@ class WialonLogin:
             "wialon/ajax.html",
             {"svc": "token/login", "params": json.dumps({"token": self.access_token})},
         )
-
-        logger.debug(f"!!!!! {response = }")
         return response
 
     def get_sdk_url(self):
@@ -103,13 +111,12 @@ class WialonInfo(WialonLogin):
                 ),
             },
         )
-        # logger.debug(f"{response = }")
 
         if "error" in response:
             return response
         if itemsType == "avl_unit_group":
             return response
-        
+
         for item in response["items"]:
             output[item["id"]] = {
                 "id": item["id"],
@@ -118,15 +125,16 @@ class WialonInfo(WialonLogin):
         self.devices = output
         return output
 
-    def fuel_report(self, object_id: int, flag: str, date_start: str, date_end: str) -> dict | None:
+    def fuel_report(
+        self, object_id: int, flag: str, date_start: str, date_end: str
+    ) -> Optional[dict]:
 
         batch_params = [self.__get_clenup_params()]
         batch_response = self._batch_request(batch_params)
         logger.debug(f"batch_response: {batch_response}")
-        
+
         self._exec_request(object_id, flag, date_start, date_end)
         apply_report_result = self._check_report_status()
-
 
         if apply_report_result is None:
             raise Exception("Ошибка применения результата отчета")
@@ -134,27 +142,45 @@ class WialonInfo(WialonLogin):
         json_response = self._get_render_json()
         return json_response
 
-    def sensor_statistics_report_for_all(self, flag: str): 
+    def sensor_statistics_report_for_all(self, flag: str, group_type: str) -> dict:
         devices_with_problem = []
         devices = self.get_user_devices()
 
-        for device_id, device_info in devices.items():
-            sensors_data = self.get_sensors_statistics(device_id, flag)
-            device_info['sensors'] = sensors_data
+        if group_type != "all":
+            groups = self.get_user_devices("avl_unit_group")
+            groups_items = next(
+                (item for item in groups["items"] if item["nm"] == group_type), None
+            )
+            if groups_items:
+                id_arrays = groups_items["u"]
+            else:
+                id_arrays = devices.keys()
+        else:
+            id_arrays = devices.keys()
 
-            if sensors_data["params_with_error"]: devices_with_problem.append(device_id)
+        for device_id in id_arrays:
+            device_info = devices.get(device_id)
+            if device_info:
+                sensors_data = self.get_sensors_statistics(device_id, flag)
+                device_info["sensors"] = sensors_data
+
+                if sensors_data["params_with_error"]:
+                    devices_with_problem.append(device_id)
 
         devices["devices_with_problem"] = devices_with_problem
-        return devices   
-           
-    def fuel_report_for_all(self, flag: int, date_start: str, date_end: str) -> dict:
+        return devices
+
+    def fuel_report_for_all(
+        self, flag: int, date_start: str, date_end: str, group_type: str = "all"
+    ) -> dict:
         """
-        Получить отчет по топливу для всех устройств.
+        Получить отчет по топливу для всех устройств или для конкретной группы устройств.
 
         Args:
             flag (int): Флаг для отчета по топливу.
             date_start (str): Начальная дата.
             date_end (str): Конечная дата.
+            group_type (str): Тип группы устройств ("all" для всех устройств или имя группы).
 
         Returns:
             dict: Словарь устройств с добавленной информацией о кражах топлива.
@@ -163,49 +189,150 @@ class WialonInfo(WialonLogin):
         fuel_theft_total = 0
         devices = self.get_user_devices()
 
-        for device_id, device_info in devices.items():
-            json_response = self.fuel_report(device_id, flag, date_start, date_end)
-            data_for_table = calculate_fuel_theft(json_response)
-            fuel_theft = calculate_total_fuel_difference(data_for_table)
+        if group_type != "all":
+            groups = self.get_user_devices("avl_unit_group")
+            groups_items = next(
+                (item for item in groups["items"] if item["nm"] == group_type), None
+            )
+            if groups_items:
+                id_arrays = groups_items["u"]
+            else:
+                devices["devices_with_problem"] = []
+                devices["fuel_theft"] = 0
+                return devices
+        else:
+            id_arrays = devices.keys()  # Все устройства
 
-            fuel_theft_total += fuel_theft
-            if data_for_table:
-                devices_with_problem.append(device_id)
-                device_info["fuel_theft"] =  data_for_table
-            
+        for device_id in id_arrays:
+            device_info = devices.get(device_id)
+            if device_info:
+                json_response = self.fuel_report(device_id, flag, date_start, date_end)
+                data_for_table = calculate_fuel_theft(json_response)
+                fuel_theft = calculate_total_fuel_difference(data_for_table)
+
+                fuel_theft_total += fuel_theft
+                if data_for_table:
+                    devices_with_problem.append(device_id)
+                    device_info["fuel_theft"] = data_for_table
+
         devices["devices_with_problem"] = devices_with_problem
         devices["fuel_theft"] = fuel_theft_total
-        return devices       
+        return devices
 
     def get_sensors_statistics(self, object_id: int, flag: str) -> dict:
+        """
+        Получение статистики датчиков для заданного объекта и временного интервала.
+
+        Args:
+            object_id: ID объекта.
+            flag: Флаг, указывающий временной интервал.
+
+        Returns:
+            dict: Статистика датчиков или сообщение об ошибке.
+        """
         try:
-
             sensors = self._get_sensors(object_id)
-            test_sensors = _rebuilding_sensor_format(sensors)
-            
+            sensors = _rebuilding_sensor_format(sensors)
+
             self._remove_layer()
-            timeFrom, timeTo = get_time_start_and_end(flag)
-            messages = self._create_messages_layer(object_id, timeFrom, timeTo)
-            
-            if messages is None or messages.get("error") == 1001:
-                logger.error(f"Error messages: {messages}")
-                return {"params_with_error": ["terminal"], "terminal":{"name":"Потеря сотовой связи", "type":"custom", "param":"terminal", "data":{f"{timeFrom}":"Нет сообщений для выбранного интервала"}}}
-            if messages.get("error") == 6:
-                return {"params_with_error": ["terminal"], "terminal":{"name":"Терминал", "type":"custom", "param":"terminal", "data":{f"{timeFrom}":"Терминал или ТС отсутвуют в системе"}}}
-            
-            max_index, min_index = calculation_max_and_min_index(
-                messages["units"][0]["msgs"]["count"]
-            )
-            logger.debug(f" Индексы min: {min_index} | max: {max_index} ")
+            time_from, time_to = get_time_start_and_end(flag)
 
-            
-            batch_params = [self.__get_render_messages_params(min_index, max_index, object_id)]
-            statistics = self._batch_request(batch_params)
+            messages = self._fetch_messages(object_id, time_from, time_to)
+            if messages is None:
+                return self._handle_no_messages(time_from)
+            elif messages.get("error") == 6:
+                return self._handle_terminal_absence(time_from)
 
-            return exception_sensors_data(test_sensors, statistics)
+            return self._process_messages(messages, object_id, sensors)
         except Exception as e:
             logger.opt(exception=e).critical("Ошибка в получении датчиков")
-    
+            return {}
+
+    def _fetch_messages(
+        self, object_id: int, time_from: int, time_to: int
+    ) -> Optional[dict]:
+        """
+        Получение сообщений для заданного объекта и временного интервала.
+
+        Args:
+            object_id: ID объекта.
+            time_from (unix): Начало интервала.
+            time_to: Конец интервала.
+
+        Returns:
+            Optional[dict]: Сообщения или None, если возникла ошибка.
+        """
+        messages = self._create_messages_layer(object_id, time_from, time_to)
+        if messages is None or messages.get("error") == 1001:
+            return None
+        return messages
+
+    def _handle_no_messages(self, time_from: int) -> dict:
+        """
+        Обработка ситуации отсутствия сообщений.
+
+        Args:
+            time_from (unix): Начало интервала.
+
+        Returns:
+            dict: Сообщение об ошибке.
+        """
+        time_from = convert_unix_to_datetime(time_from)
+        return {
+            "params_with_error": ["terminal"],
+            "terminal": {
+                "name": "Потеря сотовой связи",
+                "type": "custom",
+                "param": "terminal",
+                "data": {f"{time_from}": "Нет сообщений для выбранного интервала"},
+            },
+        }
+
+    def _handle_terminal_absence(self, time_from: int) -> dict:
+        """
+        Обработка ситуации отсутствия терминала или ТС в системе.
+
+        Args:
+            time_from (unix): Начало интервала.
+
+        Returns:
+            dict: Сообщение об отсутствии терминала или ТС.
+        """
+        time_from = convert_unix_to_datetime(time_from)
+        return {
+            "params_with_error": ["terminal"],
+            "terminal": {
+                "name": "Терминал",
+                "type": "custom",
+                "param": "terminal",
+                "data": {f"{time_from}": "Терминал или ТС отсутвуют в системе"},
+            },
+        }
+
+    def _process_messages(self, messages: dict, object_id: int, sensors: dict) -> dict:
+        """
+        Обработка полученных сообщений и создание статистики датчиков.
+
+        Args:
+            messages (dict): Сообщения.
+            object_id (int): Начало интервала.
+            sensors (dict): Датчики.
+
+        Returns:
+            dict: Статистика датчиков.
+        """
+        max_index, min_index = calculation_max_and_min_index(
+            messages["units"][0]["msgs"]["count"]
+        )
+        logger.debug(f"Индексы min: {min_index} | max: {max_index}")
+
+        batch_params = [
+            self.__get_render_messages_params(min_index, max_index, object_id)
+        ]
+        statistics = self._batch_request(batch_params)
+
+        return exception_sensors_data(sensors, statistics)
+
     def get_templates(self):
         """
         Получить все существующие шаблоны
@@ -258,7 +385,7 @@ class WialonInfo(WialonLogin):
 
         if "error" in sensors or sensors is None:
             raise Exception()
-        
+
         return sensors["item"]["sens"]
 
     def _remove_layer(self, layerName="messages") -> None:
@@ -276,7 +403,9 @@ class WialonInfo(WialonLogin):
             method="post",
         )
 
-    def _create_messages_layer(self, object_id: int, timeFrom: int, timeTo: int) -> dict:
+    def _create_messages_layer(
+        self, object_id: int, timeFrom: int, timeTo: int
+    ) -> dict:
         """
         TODO: Обдумать как время делать
 
@@ -316,7 +445,7 @@ class WialonInfo(WialonLogin):
         то перед выполнением следующего отчета их следует удалить командой report/cleanup_result:
         URL: https://sdk.wialon.com/wiki/ru/sidebar/remoteapi/apiref/report/cleanup_result
         """
-        return {"svc":"report/cleanup_result","params":{}}
+        return {"svc": "report/cleanup_result", "params": {}}
 
     def _batch_request(self, params_l: list[dict]) -> list[dict]:
         """
@@ -331,9 +460,9 @@ class WialonInfo(WialonLogin):
                 post_data={
                     "svc": "core/batch",
                     "sid": self.sid,
-                    "params": json.dumps(data)
+                    "params": json.dumps(data),
                 },
-                method="post"
+                method="post",
             )
             return response
         except Exception as e:
@@ -404,7 +533,7 @@ class WialonInfo(WialonLogin):
             method="post",
         )
 
-    def _check_report_status(self) -> dict | None:
+    def _check_report_status(self) -> Optional[dict]:
         """
         1 - Ожидает очереди | 2 - Выполняется | 4 - Готов \n
         8 - Отменен | 16 - Ошибка, не удалось найти отчет
@@ -432,7 +561,7 @@ class WialonInfo(WialonLogin):
                 "indexFrom": min_index,
                 "indexTo": max_index,
                 "unitId": object_id,
-            }
+            },
         }
 
     def _get_render_json(self) -> dict:

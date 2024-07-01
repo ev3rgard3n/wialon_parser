@@ -1,7 +1,7 @@
-from django.http import JsonResponse, HttpResponse
-
-import requests
 import json
+import requests
+
+from django.http import JsonResponse, HttpResponse
 
 from .wialon import *
 
@@ -60,21 +60,3 @@ def parse_data(data):
             'name': item['d']['nm'],
         }
     return output
-
-def first_init(request):
-    # a = json.loads(requests.get('https://hst-api.wialon.com/wialon/ajax.html', data={
-    #     'svc': 'events/check_updates',
-    #     'sid': '03a3d36cc0fd7b41ac6e228cbc3c4e92',
-    #     'params': '{"detalization":3}'
-    # }).content)
-    a = wialon_login()
-    eid = a['eid']
-    monu = a['user']['prp']['monu']
-    df = parse_data(wialon_update_data_flags(monu, eid))
-
-    # c = json.loads(requests.post('https://hst-api.wialon.com/wialon/ajax.html',
-    #                              data={'sid': '03a3d36cc0fd7b41ac6e228cbc3c4e92',
-    #                                    'params': '{"params":[{"svc":"events/update_units","params":{"mode":"add", "units": []}}],"flags":0}'}).content)
-    # l = json.loads(requests.post('https://hst-api.wialon.com/wialon/ajax.html?svc=events/check_updates&params=%7B%22detalization%22%3A3%7D&sid=03acf9252cac984c4ec71403a32f269a').content)
-    # return JsonResponse(df, json_dumps_params={'ensure_ascii': False})
-    return JsonResponse(df, json_dumps_params={'ensure_ascii': False})
