@@ -99,34 +99,43 @@ def get_sensors_statistics(request, object_id) -> dict:
         return JsonResponse({"error": str(e)})
 
 
-def fuel_report(request, object_id) -> dict:
-    session_check = check_session_status(request)
-    if session_check:
-        return session_check
-    
-    sdk_url, sid, user_id = get_start_param_from_session(request)
+def report(request, object_id) -> dict:
+    try:
+        session_check = check_session_status(request)
+        if session_check:
+            return session_check
+        
+        sdk_url, sid, user_id = get_start_param_from_session(request)
 
-    flag = request.GET.get("flag", "0x04")
-    date_start = request.GET.get("start", "0")
-    date_end = request.GET.get("end", "1")
+        flag = request.GET.get("flag", "0x04")
+        date_start = request.GET.get("start", "0")
+        date_end = request.GET.get("end", "1")
 
-    new_wialon_devices_info = WialonInfo(sdk_url, sid, user_id)
-    json_response = new_wialon_devices_info.fuel_report(
-        object_id, flag, date_start, date_end
-    )
+        new_wialon_devices_info = WialonInfo(sdk_url, sid, user_id)
+        json_response = new_wialon_devices_info.fuel_report(
+            object_id, flag, date_start, date_end
+        )
 
-    data_for_table = calculate_fuel_theft(json_response)
-    fuel_theft = calculate_total_fuel_difference(data_for_table)
+        data_for_table = calculate_fuel_theft(json_response)
+        fuel_theft = calculate_total_fuel_difference(data_for_table)
 
-    context = {
-        "object_id": object_id,
-        "wialon_user": request.session.get("wialon_user", None),
-        "data_for_chart": json.dumps(json_response),
-        "data_for_table": data_for_table,
-        "fuel_theft": fuel_theft,
-        "statistics": new_wialon_devices_info.get_sensors_statistics(object_id, flag),
-    }
-    return render(request, "report/fuel.html", context)
+        context = {
+            "object_id": object_id,
+            "wialon_user": request.session.get("wialon_user", None),
+            "data_for_chart": json.dumps(json_response),
+            "data_for_table": data_for_table,
+            "fuel_theft": fuel_theft,
+            "statistics": new_wialon_devices_info.get_sensors_statistics(object_id, flag)
+        }
+        return render(request, "report/fuel.html", context)
+    except TerminalException as e:
+        context = {
+            "object_id": object_id,
+            "wialon_user": request.session.get("wialon_user", None),
+            "fuel_theft": 0,
+            "statistics": new_wialon_devices_info.handle_graph_absence(flag)
+        }
+        logger.opt(exception=e).critical("PORNO")
 
 
 def report_for_all(request):

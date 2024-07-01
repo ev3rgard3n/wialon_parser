@@ -1,0 +1,5 @@
+
+
+
+class TerminalException(Exception):
+    pass

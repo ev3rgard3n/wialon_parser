@@ -4,6 +4,7 @@ from loguru import logger
 import requests
 import json
 
+from project.exceptions import TerminalException
 from project.interfaces import WialonI
 from project.utils import (
     _rebuilding_sensor_format,
@@ -135,12 +136,37 @@ class WialonInfo(WialonLogin):
 
         self._exec_request(object_id, flag, date_start, date_end)
         apply_report_result = self._check_report_status()
+        logger.debug(f"apply_report_result: {apply_report_result}")
 
-        if apply_report_result is None:
-            raise Exception("Ошибка применения результата отчета")
+        self._check_apply_report_result(apply_report_result)
 
         json_response = self._get_render_json()
         return json_response
+
+    def _check_apply_report_result(self, data=None) -> TerminalException:
+        """
+        Проверяет результат отчета на соответствие условиям:
+        - attachments пустой
+        - bounds состоит из нулей
+        
+        :param data: Данные отчета для проверки
+        :raises TerminalException: Если данные не соответствуют условиям или отсутствуют
+        """
+        if data is None:
+            raise TerminalException("Данные отчета отсутствуют")
+
+        try:
+            attachments_empty = not data['reportResult']['attachments']
+            
+            bounds = data['reportLayer']['bounds']
+            bounds_all_zeros = len(bounds) == 4 and all(value == 0 for value in bounds)
+            
+            if not (attachments_empty and bounds_all_zeros):
+                raise TerminalException("Отчет не соответствует условиям: attachments не пуст или bounds содержит ненулевые значения")
+            
+        except KeyError as e:
+            raise TerminalException(f"Отсутствует ожидаемый ключ в данных отчета: {e}")
+        return True
 
     def sensor_statistics_report_for_all(self, flag: str, group_type: str) -> dict:
         devices_with_problem = []
@@ -238,6 +264,7 @@ class WialonInfo(WialonLogin):
             time_from, time_to = get_time_start_and_end(flag)
 
             messages = self._fetch_messages(object_id, time_from, time_to)
+            logger.debug(f"{messages =}")
             if messages is None:
                 return self._handle_no_messages(time_from)
             elif messages.get("error") == 6:
@@ -305,7 +332,28 @@ class WialonInfo(WialonLogin):
                 "name": "Терминал",
                 "type": "custom",
                 "param": "terminal",
-                "data": {f"{time_from}": "Терминал или ТС отсутвуют в системе"},
+                "data": {f"{time_from}": "Нет сообщений для выбранного интервала"},
+            },
+        }
+    
+    def handle_graph_absence(self, flag:str) -> dict:
+        """
+        Обработка ситуации отсутствия терминала или ТС в системе.
+
+        Args:
+            time_from (unix): Начало интервала.
+
+        Returns:
+            dict: Сообщение об отсутствии терминала или ТС.
+        """
+        time_from, time_to = get_time_start_and_end(flag)
+        return {
+            "params_with_error": ["terminal"],
+            "terminal": {
+                "name": "Терминал",
+                "type": "custom",
+                "param": "terminal",
+                "data": {f"{convert_unix_to_datetime(time_from)}": "Терминал или ТС отсутвуют в системе"},
             },
         }
 
